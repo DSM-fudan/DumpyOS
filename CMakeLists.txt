@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.20)
+project(FADAS)
+
+set(CMAKE_CXX_STANDARD 23)
+#set(CMAKE_BUILD_TYPE Release)
+#set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
+
+find_package(Threads REQUIRED)
+find_package(GSL REQUIRED)
+include_directories(${GSL_INCLUDE_DIRES} ${GSLCBLAS_INCLUDE_DIRS})
+link_libraries(${GSL_LIBRARIES} ${GSLBLAS_LIBRARIES})
+
+add_executable(FADAS src/main.cpp include/DataStructures/TimeSeries.h include/DataStructures/PqItemSeries.h src/DSTree/DSTreeNode.cpp include/DSTree/DSTreeNode.h include/DSTree/InsertedSeries.h include/DSTree/Sketch.h include/DSTree/PqItemNode.h include/DSTree/SplitInfo.h include/DSTree/INodeSegmentSplitPolicy.h src/DSTree/DSTreeNodeConstruction.cpp include/DSTree/DSTreeNodeConstruction.h src/DSTree/MeanNodeSegmentSplitPolicy.cpp include/DSTree/MeanNodeSegmentSplitPolicy.h src/DSTree/StdevNodeSegmentSplitPolicy.cpp include/DSTree/StdevNodeSegmentSplitPolicy.h src/Utils/FileUtil.cpp include/Utils/FileUtil.h src/Utils/TimeSeriesUtil.cpp include/Utils/TimeSeriesUtil.h src/Utils/SaxUtil.cpp include/Utils/SaxUtil.h include/DataStructures/PqItemIndex.h src/Utils/MathUtil.cpp include/Utils/MathUtil.h src/SearchEngine/ExactSearcher.cpp include/Searchers/ExactSearcher.h src/SearchEngine/DSTreeApproxSearcher.cpp include/Searchers/DSTreeApproxSearcher.h src/SearchEngine/DSTreeExactSearcher.cpp include/Searchers/DSTreeExactSearcher.h src/IndexConstruction/GraphConstruction.cpp include/DataStructures/GraphConstruction.h src/PqItemSeries.cpp src/DSTree/INodeSegmentSplitPolicy.cpp src/Expr/Recall.cpp include/Expr/Recall.h include/Const.h src/Expr/DataDistribution.cpp include/Expr/DataDistribution.h src/Tardis/TardisTreeNode.cpp include/Tardis/TardisTreeNode.h src/SearchEngine/TardisApproxSearch.cpp include/Searchers/TardisApproxSearch.h src/IndexConstruction/IPGNode.cpp include/DataStructures/IPGNode.h src/IndexConstruction/IPGPartition.cpp include/DataStructures/IPGPartition.h src/SearchEngine/IPGApproxSearcher.cpp include/Searchers/IPGApproxSearcher.h src/iSAX/iSAXNode.cpp include/DataStructures/iSAXNode.h src/SearchEngine/iSAXSearcher.cpp include/Searchers/iSAXSearcher.h src/Expr/RandDataGenerator.cpp include/Expr/RandDataGenerator.h src/Expr/DNATranslator.cpp include/Expr/DNATranslator.h src/IndexConstruction/IPGDataNode.cpp include/DataStructures/IPGDataNode.h src/Utils/INIReader.cpp include/Utils/INIReader.h src/Utils/ini.c include/DataStructures/OffsetDist.h src/Const.cpp src/IndexConstruction/FADASNode.cpp include/DataStructures/FADASNode.h src/SearchEngine/FADASSearcher.cpp include/Searchers/FADASSearcher.h src/IndexConstruction/FADASFuzzy.cpp src/Expr/ECGParser.cpp include/Expr/ECGParser.h src/TAR/TARGNode.cpp include/TAR/TARGNode.h src/TAR/TARLNode.cpp include/TAR/TARLNode.h src/SearchEngine/TARSearcher.cpp include/TAR/TARSearcher.h)
+
+target_link_libraries(FADAS Threads::Threads libboost_serialization-mt-x64.a libboost_serialization-mt-x64.so libboost_serialization.so.1.76.0 ${GSL_LIBRARIES} ${GSLBLAS_LIBRARIES})
