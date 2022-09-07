@@ -1115,7 +1115,7 @@ void Recall::doExprWithResIncFADAS(FADASNode *root, vector<vector<int>> *g, cons
     Const::logPrint( "result file is " + Const::resfn);
     int k = Const::k;
 //    int ks[]{10};
-    int node_nums[]{1,2,3,4,5, 10, 25};
+    int node_nums[]{1,2,3,4,5, 10, 25,50,100};
 //    int node_nums[]{25};
     float *query;
     float query_reordered[Const::tsLength];

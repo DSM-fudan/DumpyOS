@@ -756,13 +756,13 @@ void FADASSearcher::approxIncSearchInterNode(FADASNode *root, TimeSeries *queryT
 //    }
 //    sort(candidates.begin(),  candidates.end());
 
-    vector<PqItemFadas>candidates;
+    vector<FADASNode*>candidates;
     unordered_set<FADASNode*>cands;
     for(FADASNode *node: parent->children)
         if(node != nullptr && node!=cur && cands.find(node) == cands.end()) {
             double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax, node->layer);
             cands.insert(node);
-            candidates.emplace_back(node , dist);
+            candidates.push_back(node);
         }
     cands.clear();
     sort(candidates.begin(), candidates.end(), comp_fadas);
