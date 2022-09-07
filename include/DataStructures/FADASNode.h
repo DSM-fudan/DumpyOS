@@ -115,6 +115,9 @@ class FADASNode {
     void growIndexLessPack();
     void growIndexFuzzy(unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl, vector<vector<int>> *g);
 
+    void collectSAXwords(unsigned short *node_saxes, int *cur, vector<string> &leaf_files, vector<string> &sax_files);
+    void deleteSubtree();
+
     void fuzzySeriesInPartUnit(partUnit *part_units, int actual_size, int chosen_num, vector<int> &node_offsets,
                                vector<int> &series_index_list,
                                unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl, int _id) const;
@@ -149,6 +152,7 @@ public:
     vector<int> chosenSegments{};
     vector<FADASNode*>children;
     int size = 0;
+    int leaf_num = 0;
     int id = -1;
     string file_id{};   // to identify a particular leaf node
     int layer = 0;
@@ -173,10 +177,16 @@ public:
         if(isLeafPack())    return "P-" + to_string(layer) + "-" + file_id;
         if(isLeafNode())    return to_string(layer) + "-" + file_id;
     }
+    void getFileNameInsert(const string &index_dir, string &sax_file, string &data_file) const;
     [[nodiscard]] bool isLeafNode() const   {return size <= Const::th && partition_id == -1;}
     [[nodiscard]] bool isLeafPack() const {return size <= Const::th && partition_id != -1;}
     [[nodiscard]] bool isInternalNode() const {return  size > Const::th;}
+    void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
+                float *query_reordered, int *ordering) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
+    void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
+                std::unordered_set<float *, createhash, isEqual> *hash_set) const;
+
     void search_offset(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
 
     static FADASNode*  BuildIndexFuzzy(const string & datafn, const string & saxfn, const string &paafn, vector<vector<int>>* g);
@@ -185,7 +195,7 @@ public:
     template<class Archive>
     void serialize(Archive &ar, const unsigned int version) {
         ar & partition_id; ar & layer;
-        ar & file_id;
+        ar & file_id; ar & id;
         ar & size;
         ar & sax;   ar & bits_cardinality;
         ar & children;
@@ -201,12 +211,11 @@ public:
 
     void getIndexStats();
     int getLeafNodeNum();
+    int assignLeafNum();
     int getBiasLeafNodeNum();
 
     FADASNode *route1step(const unsigned short *_sax);
 
-    void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
-                std::unordered_set<float *, createhash, isEqual> *hash_set) const;
 
     SAX_INFO *statSAX();
 
@@ -258,6 +267,8 @@ public:
 
     void determineSegmentsAvgVariance();
 
+    void determineSegmentsNaive();
+
     void searchDTW(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
 
     static long generateSaxTbl();
@@ -267,6 +278,14 @@ public:
     static void generateSaxTbl(const float *tss, int series_num);
 
     void routeDuringInsertion(const unsigned short *_sax, int pos);
+
+    void determineSegments(unsigned short *node_saxes);
+
+    void growIndex(unsigned short *node_saxes, bool need_free);
+
+    void reorganize(float *tss, FADASNode *parent);
+
+    void insertBatch(float *tss, int batch_size);
 };
 
 struct NODE_RECORDER{

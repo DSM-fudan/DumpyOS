@@ -104,6 +104,10 @@ void FileUtil::getFiles(const string& path, vector<string>& files )
         else files.push_back(entry.path());
 }
 
+void FileUtil::renameFile(const string &old_file, const string &new_file){
+    rename(old_file.c_str(), new_file.c_str());
+}
+
 float * FileUtil::readSeries(FILE* f){
     auto *ts = new float[Const::tsLength];
     fread(ts, sizeof(float), Const::tsLength, f);

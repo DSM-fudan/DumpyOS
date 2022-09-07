@@ -24,7 +24,8 @@ public:
 
     // sec:expr
     static string dataset, method;
-    static int tsLength, maxK, index, ops, materialized, method_code, query_num, series_num, k, dtw_window_size;
+    static int tsLength, maxK, index, ops, materialized, method_code, query_num, series_num, k, dtw_window_size,
+    batch_size, batch_num;
     static double dtw_window_percent;
 
     //sec: parameter
@@ -86,6 +87,12 @@ public:
 
         k = reader.GetInteger("expr", "k", -1);
         cout << "k: " << k << endl;
+
+        batch_size = reader.GetInteger("expr", "batch_size", -1);
+        cout << "batch_size: " << batch_size << endl;
+
+        batch_num = reader.GetInteger("expr", "batch_num", -1);
+        cout << "batch_num: " << batch_num << endl;
 
         dtw_window_percent = reader.GetReal("expr", "dtw_window_percent", -1);
         cout << "dtw_window_percent: " << dtw_window_percent << endl;

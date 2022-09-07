@@ -653,6 +653,12 @@ void recallExprResFADAS(){
     Recall::doExprWithResFADAS(root, g, Const::fidxfn);
 }
 
+void ngSearch(){
+    FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
+    auto *g = loadGraphSkeleton();
+    Recall::ngSearchDumpy(root, g);
+}
+
 void approxSearchTARDISORIGIN(){
     TARGNode* root = TARGNode::loadFromDisk(Const::tardisfn + "root.idx");
     Recall::approxTARDISORIGIN(root);
@@ -821,6 +827,12 @@ int main() {
                     if(Const::materialized == 1)
                         recallExprResIncFADASDTW();
                     break;
+                case 9:
+                    if(Const::materialized == 1)
+                        Recall::completeWorkload();
+                case 10:
+                    if(Const::materialized == 1)
+                        ngSearch();
                 default:
                     break;
             }

@@ -86,6 +86,8 @@ public:
 
     static double dtw(const float* A, const float* B, int len, int r, double bsf);
 
+    static double euclideanDist(float *query_reordered, float *ts, int size, double bound, int *order);
+
 //    static void knnWithBsf(const DSTreeNode &node, InsertedSeries &queryTs, int k, vector<PqItemSeriesVector *> &heap);
 //
 //    static vector<PqItemSeriesVector *> & knnVector(const DSTreeNode &node, InsertedSeries &q, int k);

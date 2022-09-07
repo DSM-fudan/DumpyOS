@@ -41,9 +41,9 @@ vector<PqItemSeries *> * FADASSearcher::approxSearch(FADASNode *root, float *que
         // we only concern whether the nearest node is a leaf or an internal node
         if(node->isInternalNode()){
             approxSearchInterNode(node, queryTs, sax, k, heap, index_dir);
-        }else { node->search(k, queryTs, *heap, index_dir); targetNode = node;}
+        }else { node->search(k, queryTs, *heap, index_dir, nullptr, nullptr); targetNode = node;}
     }else if(!cur->isInternalNode()){
-        { cur->search(k, queryTs, *heap, index_dir); targetNode = cur;}
+        { cur->search(k, queryTs, *heap, index_dir, nullptr, nullptr); targetNode = cur;}
     }else approxSearchInterNode(cur, queryTs, sax, k, heap, index_dir);
     
     delete queryTs;
@@ -55,7 +55,7 @@ void FADASSearcher::approxSearchInterNode(FADASNode *root, TimeSeries *queryTs, 
                                           vector<PqItemSeries *> *heap, const string &index_dir) {
     FADASNode *cur = root->route(sax);
     if(!cur->isInternalNode()){
-        cur->search(k, queryTs, *heap, index_dir);
+        cur->search(k, queryTs, *heap, index_dir, nullptr, nullptr);
         targetNode = cur;
         return;
     }
@@ -84,7 +84,7 @@ void FADASSearcher::approxSearchInterNode(FADASNode *root, TimeSeries *queryTs, 
     if(node->isInternalNode()){
         approxSearchInterNode(node, queryTs, sax, k, heap, index_dir);
         return;
-    }else { node->search(k, queryTs, *heap, index_dir); targetNode = node;}
+    }else { node->search(k, queryTs, *heap, index_dir, nullptr, nullptr); targetNode = node;}
 }
 
 vector<PqItemSeries *> * FADASSearcher::approxSearchDTW(FADASNode *root, float *query, int k, vector<vector<int>> *g,
@@ -226,7 +226,7 @@ void FADASSearcher::approxSearchInterNodeLessPack(FADASNode *root, TimeSeries *q
     if(node->isInternalNode()){
         approxSearchInterNode(node, queryTs, sax, k, heap, index_dir);
         return;
-    }else { node->search(k, queryTs, *heap, index_dir); targetNode = node;}
+    }else { node->search(k, queryTs, *heap, index_dir, nullptr, nullptr); targetNode = node;}
 }
 
 vector<PqItemSeries *> * FADASSearcher::approxSearchPos(FADASNode *root, float *query, int k, vector<vector<int>> *g,
@@ -306,8 +306,26 @@ struct PqItemFadas{
         if(node == pt.node) return false;
         else {
             if(dist != pt.dist) return dist < pt.dist;
-            else return node < pt.node;
+            if(node->isInternalNode())  return true;
+            return false;
         }
+    }
+};
+
+struct PqItemFadasId{
+    FADASNode* parent;
+    int id;
+    double dist{};
+
+    PqItemFadasId(FADASNode* _parent, int _id, double d){parent = _parent;id= _id; dist = d;}
+    PqItemFadasId(){id=-1; dist = 0;parent = nullptr;}
+
+    bool operator <(const PqItemFadasId & pt) const{
+        if(dist != pt.dist)
+            return dist < pt.dist;
+        if(parent->layer != pt.parent->layer)
+            return parent->layer < pt.parent->layer;
+        return false;
     }
 };
 
@@ -341,7 +359,7 @@ vector<PqItemSeries*>*FADASSearcher::exactSearch(FADASNode* root, float *query, 
                 }
             inserted.clear();
         }else{
-            cur.node->search(k, queryTs, *heap, Const::fidxfn);
+            cur.node->search(k, queryTs, *heap, Const::fidxfn, nullptr, nullptr);
             ++LOADED_NODE_CNT;
             bsf = (*heap)[0]->dist;
         }
@@ -456,7 +474,7 @@ bool comp_fadas_dtw(const FADASNode* x, const FADASNode* y){
 
 
 vector<PqItemSeries *> * FADASSearcher::approxIncSearch(FADASNode *root, float *query, int k, const string &index_dir,
-                                                        int node_num) {
+                                                        int node_num, float * query_reordered, int*ordering) {
     auto* queryTs = new TimeSeries(query);
     t_paa = queryTs->paa;
     auto*heap = new vector<PqItemSeries*>();
@@ -465,13 +483,172 @@ vector<PqItemSeries *> * FADASSearcher::approxIncSearch(FADASNode *root, float *
     for(int i=0;i<Const::segmentNum;++i)
         sax[i] = (*(queryTs->sax))[i];
 
-    approxIncSearchInterNode(root, queryTs, sax, k, heap, index_dir, node_num);
+    approxIncSearchInterNode(root, queryTs, sax, k, heap, index_dir, node_num, query_reordered, ordering);
 
     delete queryTs;
     sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
     return heap;
 
 }
+
+double getMinDist1stLayer(const float *paa, int id){
+    double ret = 0;
+    for(int i=Const::segmentNum-1;i>=0;--i){
+        if(id %2 == 1){
+            if(paa[i] <0)
+                ret += (-paa[i]);
+        }else{
+            if(paa[i] > 0)
+                ret += (paa[i]);
+        }
+        id >>=1;
+    }
+    return ret;
+}
+
+vector<PqItemSeries *> *FADASSearcher::ngSearch(FADASNode *root, float *query, float *query_reordered, int *ordering,
+                                                            int k,
+                                                            vector<vector<int>> *g, int nprobes){
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+    set<PqItemFadasId>pq;
+    for(int i =0;i<Const::vertexNum;++i){
+        if(root->children[i] == nullptr)    continue;
+        double dist  = getMinDist1stLayer(queryTs->paa , i);
+        pq.insert(PqItemFadasId(root,i, dist));
+    }
+    unordered_set<FADASNode*>visited;
+    int cur_probe = 1;
+    while(!pq.empty() && cur_probe < nprobes){
+        double top_dist;
+        FADASNode* node;
+        top_dist = pq.begin()->dist;
+        if(top_dist > bsf)  break;
+        node = pq.begin()->parent->children[pq.begin()->id];
+        pq.erase(pq.begin());
+        if(visited.count(node) > 0) continue;
+        visited.insert(node);
+
+        if(node->isInternalNode()){
+            int len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr || node->children[i] == targetNode)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax, node->bits_cardinality, node->chosenSegments, i);
+                if(dist < bsf){
+                    pq.insert(PqItemFadasId(node, i, dist));
+                }
+            }
+        }else{
+            node->search(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            ++cur_probe;
+            bsf = (*heap)[0]->dist;
+        }
+    }
+    pq.clear();
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+
+}
+
+
+vector<PqItemSeries *> *FADASSearcher::ngSearchIdLevelNaive(FADASNode *root, float *query, float *query_reordered, int *ordering,
+                                                int k,
+                                                vector<vector<int>> *g, int nprobes){
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+    set<PqItemFadasId>pq;
+    for(int i =0;i<Const::vertexNum;++i){
+        if(root->children[i] == nullptr)    continue;
+        double dist  = getMinDist1stLayer(queryTs->paa , i);
+        pq.insert(PqItemFadasId(root,i, dist));
+    }
+    unordered_set<FADASNode*>visited;
+    int cur_probe = 1;
+    while(!pq.empty() && cur_probe < nprobes){
+        double top_dist;
+        FADASNode* node;
+        top_dist = pq.begin()->dist;
+        if(top_dist > bsf)  break;
+        node = pq.begin()->parent->children[pq.begin()->id];
+        pq.erase(pq.begin());
+        if(visited.count(node) > 0) continue;
+        visited.insert(node);
+
+        if(node->isInternalNode()){
+            int len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr || node->children[i] == targetNode)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax, node->bits_cardinality, node->chosenSegments, i);
+                if(dist < bsf){
+                    pq.insert(PqItemFadasId(node, i, dist));
+                }
+            }
+        }else{
+            node->search(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            ++cur_probe;
+            bsf = (*heap)[0]->dist;
+        }
+    }
+    pq.clear();
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+
+}
+
+vector<PqItemSeries *> *FADASSearcher::ngSearchNaive(FADASNode *root, float *query, float *query_reordered, int *ordering,
+                                                int k,
+                                                vector<vector<int>> *g, int nprobes) {
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+    set<PqItemFadas>pq;
+    pq.insert(PqItemFadas(root, 0));
+
+    PqItemFadas cur;
+    int cur_probe = 1;
+    while(!pq.empty() && cur_probe < nprobes){
+        cur = *pq.begin();
+        if(cur.dist > bsf)  break;
+        pq.erase(pq.begin());
+        if(cur.node->isInternalNode()){
+            unordered_set<FADASNode*>inserted;
+            for(FADASNode* node:cur.node->children)
+                if(node != nullptr && node != targetNode && inserted.find(node) == inserted.end()) {
+//                    auto start = chrono::system_clock::now();
+                    inserted.insert(node);
+                    double lb_dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax, node->bits_cardinality);
+//                    auto end = chrono::system_clock::now();
+//                    LB_NODE_TIME_STAT += chrono::duration_cast<chrono::microseconds>(end - start).count();
+                    if(lb_dist < bsf){
+                        pq.insert(PqItemFadas(node, lb_dist));
+                        LB_NODE_CNT++;
+                    }
+                }
+            inserted.clear();
+        }else{
+            cur.node->search(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+//            ++LOADED_NODE_CNT;
+            ++cur_probe;
+            bsf = (*heap)[0]->dist;
+        }
+    }
+    pq.clear();
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+}
+
+
 
 vector<PqItemSeries *> * FADASSearcher::approxIncSearchDTW(FADASNode *root, float *query, int k, const string &index_dir,
                                                         int node_num) {
@@ -547,31 +724,45 @@ bool comp_fadas_id(const int i, const int j){
 }
 
 void FADASSearcher::approxIncSearchInterNode(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
-                                             vector<PqItemSeries *> *heap, const string &index_dir,int &node_num) {
+                                             vector<PqItemSeries *> *heap, const string &index_dir,
+                                             int &node_num, float *query_reordered, int *ordering) {
     if(!root->isInternalNode() || node_num <= 0)  return;
     FADASNode *cur = root->route1step(sax), *parent = root;
-    while (cur!= nullptr && cur->isInternalNode() && cur->getLeafNodeNum() > node_num) {
+    while (cur!= nullptr && cur->isInternalNode() && cur->leaf_num > node_num) {
         parent = cur;
         cur = cur->route(sax);
     }
 
     if(cur!= nullptr){
         if(!cur->isInternalNode()){
-            cur->search(k, queryTs, *heap, index_dir);
+            cur->search(k, queryTs, *heap, index_dir, query_reordered, ordering);
             --node_num;
         }else{
-            approxIncSearchInterNode(cur, queryTs, sax, k, heap, index_dir, node_num);
+            approxIncSearchInterNode(cur, queryTs, sax, k, heap, index_dir, node_num, query_reordered, ordering);
         }
     }
 
     if(node_num <=0)    return;
 
-    vector<FADASNode*>candidates;
+//    double bsf = (*heap)[0]->dist;
+//    vector<PqItemFadasId>candidates;
+//    int len = (1 << (parent->chosenSegments.size()));
+//    for(int i =0;i<len;++i){
+//        if(parent->children[i] == nullptr || parent->children[i] == cur)    continue;
+//        double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, parent->sax, parent->bits_cardinality, parent->chosenSegments, i);
+//        if(dist < bsf){
+//            candidates.emplace_back(parent, i, dist);
+//        }
+//    }
+//    sort(candidates.begin(),  candidates.end());
+
+    vector<PqItemFadas>candidates;
     unordered_set<FADASNode*>cands;
     for(FADASNode *node: parent->children)
         if(node != nullptr && node!=cur && cands.find(node) == cands.end()) {
-            candidates.push_back(node);
+            double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax, node->layer);
             cands.insert(node);
+            candidates.emplace_back(node , dist);
         }
     cands.clear();
     sort(candidates.begin(), candidates.end(), comp_fadas);
@@ -597,16 +788,31 @@ void FADASSearcher::approxIncSearchInterNode(FADASNode *root, TimeSeries *queryT
 //        }
 //    }
 
+//    unordered_set<FADASNode*>visited;
+//    for(int i=0;i<candidates.size() && node_num > 0;++i){
+//        FADASNode* node = parent->children[candidates[i].id];
+//        if(visited.count(node) > 0) continue;
+//        visited.insert(node);
+//        if(!node->isInternalNode()) {
+//            node->search(k, queryTs, *heap, index_dir, query_reordered, ordering);
+//            --node_num;
+//        }
+//        else {
+//            approxIncSearchInterNode(node, queryTs, sax, k, heap, index_dir, node_num, query_reordered, ordering);
+//        }
+//    }
 
     for(int i=0;i<candidates.size() && node_num > 0;++i){
-        if(!candidates[i]->isInternalNode()) {
-            candidates[i]->search(k, queryTs, *heap, index_dir);
+        FADASNode* node = candidates[i];
+        if(!node->isInternalNode()) {
+            node->search(k, queryTs, *heap, index_dir, query_reordered, ordering);
             --node_num;
         }
         else {
-            approxIncSearchInterNode(candidates[i], queryTs, sax, k, heap, index_dir, node_num);
+            approxIncSearchInterNode(node, queryTs, sax, k, heap, index_dir, node_num, query_reordered, ordering);
         }
     }
+
 
 }
 

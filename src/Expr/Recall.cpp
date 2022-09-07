@@ -44,6 +44,55 @@ void free_heap(vector<PqItemSeries*>*heap){
     delete heap;
 }
 
+/// Data structure for sorting the query.
+typedef struct q_index
+{   double value;
+    int    index;
+} q_index;
+
+int znorm_comp(const void *a, const void* b)
+{
+    q_index* x = (q_index*)a;
+    q_index* y = (q_index*)b;
+
+    //    return abs(y->value) - abs(x->value);
+
+    if (fabsf(y->value) > fabsf(x->value) )
+        return 1;
+    else if (fabsf(y->value) == fabsf(x->value))
+        return 0;
+    else
+        return -1;
+
+}
+
+void reorder_query(float * query_ts, float * query_ts_reordered, int * query_order)
+{
+
+    auto *q_tmp = (q_index*)malloc(sizeof(q_index) * Const::tsLength);
+    int i;
+
+    if( q_tmp == NULL )
+        return ;
+
+    for( i = 0 ; i < Const::tsLength ; i++ )
+    {
+        q_tmp[i].value = query_ts[i];
+        q_tmp[i].index = i;
+    }
+
+    qsort(q_tmp, Const::tsLength, sizeof(q_index),znorm_comp);
+
+    for( i=0; i<Const::tsLength; i++)
+    {
+
+        query_ts_reordered[i] = q_tmp[i].value;
+        query_order[i] = q_tmp[i].index;
+    }
+    free(q_tmp);
+
+}
+
 //void Recall::doExpr(Graph* g){
 //    int maxExprRound = 50;
 //    int lastIndex= g->rowDataFileName.rfind(".bin");
@@ -975,14 +1024,103 @@ void Recall::doExprWithResFADAS(FADASNode *root, vector<vector<int>> *g, const s
     fclose(f);
 }
 
+void Recall::ngSearchDumpy(FADASNode *root, vector<vector<int>> *g) {
+    int maxExprRound = Const::query_num;
+    Const::logPrint( "result file is " + Const::resfn);
+    int nprobes[]{1,2,3,4,5,10, 20, 35, 50 ,100, 130,160,240};
+//    int ks[]{25};
+    int thresholds[]{10000};
+    root->assignLeafNum();
+    float *query;
+    float query_ts_reordered[Const::tsLength];
+    int ordering[Const::tsLength];
+    FILE *f = fopen(Const::queryfn.c_str(), "rb");
+    long offset = 0;
+    fseek(f, offset * Const::tsLengthBytes, SEEK_SET);
+    for(int threshold:thresholds){
+        int _k = 0;
+        for(int probe:nprobes){
+            int recallNums[maxExprRound];
+            int search_number[maxExprRound];
+            int layers[maxExprRound];
+            long duration[maxExprRound];
+            double error_ratio[maxExprRound];
+            double inv_error_ratio[maxExprRound];
+            cout<<"------------------Experiment--------------------" << endl;
+            cout<<"nprobe: " << probe << endl;
+            cout<<"threshold: " << threshold<< endl;
+
+            for(int curRound = 0; curRound < maxExprRound; ++curRound){
+                //                    cout<<"Round : " + (curRound + 1));
+                c_nodes.clear();
+                _search_num = 0;
+                query = FileUtil::readSeries(f);
+                reorder_query(query, query_ts_reordered, ordering);
+                auto start = chrono::system_clock::now();
+                vector<PqItemSeries*> *approxKnn = FADASSearcher::ngSearch(root, query, query_ts_reordered, ordering, Const::k,g, probe);
+                auto end = chrono::system_clock::now();
+//                for(int i=0;i<256;++i)
+//                    cout << (*approxKnn)[0]->ts[i] <<",";
+                vector<float*>* exactKnn = getResult(Const::resfn, offset + curRound, Const::k);
+                vector<PqItemSeries*> exactKnn2;
+                for(float *t: *exactKnn)
+                    exactKnn2.push_back(new PqItemSeries(t, query));
+
+                duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count();
+                layers[curRound] = layer;
+                recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
+                search_number[curRound] = _search_num;
+                error_ratio[curRound] = MathUtil::errorRatio(*approxKnn, exactKnn2, Const::k);
+                inv_error_ratio[curRound] = MathUtil::invertedErrorRatio(*approxKnn, exactKnn2, Const::k);
+//                cout << curRound << ":"<<recallNums[curRound] << endl;
+                cout << recallNums[curRound] << ",";
+                fflush(stdout);
+                free_heap(approxKnn);
+                for(int i=0;i<Const::k;++i)
+                    delete[] (*exactKnn)[i];
+                delete exactKnn;
+                delete[] query;
+            }
+            ++_k;
+            cout << fixed  << endl;
+            for(int _:layers)   cout << _ << ",";
+            cout << endl;
+//            for(double _:error_ratio)   cout << _ << ",";
+            int totalRecallNum = 0;
+            for(int temp:recallNums)
+                totalRecallNum += temp;
+            cout<<"\nAverage Recall rate is : " << (float)totalRecallNum / (float) (maxExprRound * Const::k)<< endl;
+            double totalErrorRatio = 0;
+            for(double _:error_ratio)   totalErrorRatio += _;
+            cout<<"Average Error ratio is : " << totalErrorRatio / (float) (maxExprRound)<< endl;
+//            double totalinvErrorRatio = 0;
+//            for(double _:inv_error_ratio)   totalinvErrorRatio += _;
+//            cout<<"Average inv Error ratio is : " << totalinvErrorRatio / (float) (maxExprRound)<< endl;
+            double total_duration = 0;
+            for(long _:duration)    total_duration += _;
+            total_duration /= (double ) maxExprRound;
+            cout<<"Average duration is : " << total_duration/1000.0 << "ms. "
+                <<"And QPM = "<< 60000000.0 / total_duration <<endl;
+            for(int _:search_number)    cout << _ <<",";
+            cout << endl;
+            rewind(f);
+        }
+    }
+
+    fclose(f);
+}
+
 void Recall::doExprWithResIncFADAS(FADASNode *root, vector<vector<int>> *g, const string &index_dir) {
     int maxExprRound = Const::query_num;
     Const::logPrint( "result file is " + Const::resfn);
-    int k = 1;
+    int k = Const::k;
 //    int ks[]{10};
     int node_nums[]{1,2,3,4,5, 10, 25};
 //    int node_nums[]{25};
     float *query;
+    float query_reordered[Const::tsLength];
+    int ordering[Const::tsLength];
+    root->assignLeafNum();
     FILE *f = fopen(Const::queryfn.c_str(), "rb");
     long offset = 0;
     fseek(f, offset * Const::tsLengthBytes, SEEK_SET);
@@ -1002,8 +1140,9 @@ void Recall::doExprWithResIncFADAS(FADASNode *root, vector<vector<int>> *g, cons
             c_nodes.clear();
             _search_num = 0;
             query = FileUtil::readSeries(f);
+            reorder_query(query, query_reordered, ordering);
             auto start = chrono::system_clock::now();
-            vector<PqItemSeries*> *approxKnn = FADASSearcher::approxIncSearch(root, query, k, index_dir, node_num);
+            vector<PqItemSeries*> *approxKnn = FADASSearcher::approxIncSearch(root, query, k, index_dir, node_num, query_reordered, ordering);
             auto end = chrono::system_clock::now();
 //                for(int i=0;i<256;++i)
 //                    cout << (*approxKnn)[0]->ts[i] <<",";
@@ -1044,8 +1183,8 @@ void Recall::doExprWithResIncFADAS(FADASNode *root, vector<vector<int>> *g, cons
         double total_duration = 0;
         for(long _:duration)    total_duration += _;
         total_duration /= (double ) maxExprRound;
-        cout<<"Average duration is : " << total_duration << "us. "
-            <<"And QPS = "<< 1000000.0 / total_duration <<endl;
+        cout<<"Average duration is : " << total_duration / 1000.0 << "us. "
+            <<"And QPM = "<< 60000000.0 / total_duration <<endl;
         for(int _:search_number)    cout << _ <<",";
         cout << endl;
         rewind(f);
@@ -2400,7 +2539,18 @@ void Recall::doExprWithResiSAX(iSAXRoot *root, const string &resFile, const stri
 }
 
 void Recall::completeWorkload(){
-    auto* root  = FADASNode::BuildIndex(Const::datafn, Const::saxfn);
+//    auto* root  = FADASNode::BuildIndex(Const::datafn, Const::saxfn);
+    auto root = FADASNode::loadFromDisk(Const::saxfn,Const::fidxfn + "root.idx",false);
+    FILE *f = fopen(Const::datafn.c_str(), "rb");
+    fseek(f, (long)Const::series_num*Const::tsLengthBytes, SEEK_SET);
+    auto tss = new float [(long)Const::batch_size * Const::tsLength];
+    for(int i=0;i<Const::batch_num;++i){
+        Const::logPrint("Batch: " + to_string(i));
+        fread(tss, sizeof(float),(long)Const::batch_size * Const::tsLength, f);
+        root->insertBatch(tss, Const::batch_size);
+    }
+    Const::logPrint("Finished.");
+    fclose(f);
 
 }
 

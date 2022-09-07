@@ -46,6 +46,8 @@ public:
     static float *readSeries(FILE *f, const vector<int> &offsets);
 
     static float *readSeriesOffset(FILE *f, int offset);
+
+    static void renameFile(const string &old_file, const string &new_file);
 };
 
 

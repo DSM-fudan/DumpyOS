@@ -255,6 +255,18 @@ double TimeSeriesUtil::euclideanDist(const vector<float>* ts_1, const float* ts_
     return sum;
 }
 
+double TimeSeriesUtil::euclideanDist(float *query_reordered, float *ts, int size, double bound, int *order)
+{
+    int i;
+    float sum = 0;
+    for ( i = 0 ; i < size && sum < bound ; i++ )
+    {
+        //float x = (T[(order[i]+j)]-mean)/std;
+        float x = ts[order[i]];
+        sum += (x - query_reordered[i]) * (x - query_reordered[i]);
+    }
+    return sum;
+}
 double TimeSeriesUtil::dtw(const float* A, const float* B, int len, int r, double bsf)
 {
 

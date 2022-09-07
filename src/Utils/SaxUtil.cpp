@@ -602,12 +602,13 @@ double SaxUtil::LowerBound_Paa_iSax(const float *paa, const unsigned short *sax,
     double sum = 0;
     int saxValue, cur = chosen_segs.size() - 1, bc;
 
-    for (int i = 0; i < Const::segmentNum; i++) {
+    for (int i = Const::segmentNum-1; i >= 0; --i) {
         paaValue = paa[i];
         if(chosen_segs[cur] == i){
             saxValue = (sax[i] << 1) + (new_id % 2);
             new_id >>= 1;
             bc = bits_cardinality[i] + 1;
+            ++cur;
         } else {
             saxValue = sax[i];
             bc = bits_cardinality[i];
@@ -627,6 +628,7 @@ double SaxUtil::LowerBound_Paa_iSax(const float *paa, const unsigned short *sax,
 
 double SaxUtil::getMidLineFromSaxSymbolbc8(unsigned short symbol){
     double numer;
+    assert(symbol >=0 && symbol <=255);
     if(symbol == 0) {
         numer = SaxUtil::bp8[0] - (SaxUtil::bp8[1] - SaxUtil::bp8[0]);
     }

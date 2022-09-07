@@ -257,7 +257,7 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
     Const::logPrint("Finish statistic size of nodes in the 1st layer.");
 
     // partition 1st layer
-    int partNum = partition1stLayer(nodeIn1stLayer, g, Const::filling_factor_1st);
+    int partNum = partitionNew(nodeIn1stLayer, Const::segmentNum);
     Const::logPrint("Finish partition");
     FADASNode* childrenList[partNum];
     for(int i=0;i<partNum;++i)  childrenList[i] = new FADASNode(1, i);
@@ -267,10 +267,14 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
         if(nodeIn1stLayer[i].size <= 0) continue;
         for(int j = 0;j<Const::segmentNum;++j)
             (*paa_mu_part_units)[i][j] /= nodeIn1stLayer[i].size;
-        if(nodeIn1stLayer[i].pid == -1) {
+        if(nodeIn1stLayer[i].size > Const::th) {
+//            assert(nodeIn1stLayer[i].size > Const::th);
             root->children[i] = new FADASNode(1, nodeIn1stLayer[i].size, i);
             root->children[i]->generateSaxAndCardIn1stLayer(i);
             internal_size += root->children[i]->size;
+        }else if(nodeIn1stLayer[i].pid == -1){
+            root->children[i] = new FADASNode(1, nodeIn1stLayer[i].size, i);
+            root->children[i]->generateSaxAndCardIn1stLayer(i);
         }
         else{
             int pid = nodeIn1stLayer[i].pid;
@@ -278,17 +282,27 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
             childrenList[pid]->size += nodeIn1stLayer[i].size;
             childrenList[pid]->generateSaxAndCardIn1stLayer4LeafNode(i);
         }
+//        if(nodeIn1stLayer[i].pid == -1) {
+//            root->children[i] = new FADASNode(1, nodeIn1stLayer[i].size, i);
+//            root->children[i]->generateSaxAndCardIn1stLayer(i);
+//            internal_size += root->children[i]->size;
+//        }
+//        else{
+//            int pid = nodeIn1stLayer[i].pid;
+//            root->children[i] = childrenList[pid];
+//            childrenList[pid]->size += nodeIn1stLayer[i].size;
+//            childrenList[pid]->generateSaxAndCardIn1stLayer4LeafNode(i);
+//        }
     }
     Const::logPrint("Finish build index structure 1st layer.");
 
     // put data offsets to internal nodes in 1st layer
     for(int i=0;i<Const::vertexNum;++i)
-        if(nodeIn1stLayer[i].size > Const::th)
+        if(root->children[i]!= nullptr)
             root->children[i]->offsets.reserve(nodeIn1stLayer[i].size);
     for(int i=0;i<series_num;++i){
         int nav_id = navids[i];
-        if(nodeIn1stLayer[nav_id].size > Const::th)
-            root->children[nav_id]->offsets.push_back(i);
+        root->children[nav_id]->offsets.push_back(i);
     }
     end = chrono::system_clock::now();
     Const::logPrint("Start fuzzy 1st layer.");
@@ -420,11 +434,11 @@ void FADASNode::growIndexFuzzy(unordered_map<FADASNode *, NODE_RECORDER> &naviga
     if(layer > 1) vector<int>().swap(offsets);
 
 //    int partNum = partition(nodes);
-    int partNum = partition1stLayer(nodes, g, Const::filling_factor);
+    int partNum = partition(nodes, chosen_num);
     // build rest data node if any
-    for(auto &node:nodes)
-        if(node.size <= Const::th && node.pid == -1)
-            node.pid = ++partNum;
+//    for(auto &node:nodes)
+//        if(node.size <= Const::th && node.pid == -1)
+//            node.pid = ++partNum;
 
 
     FADASNode* leafChildrenList[partNum];
@@ -435,7 +449,7 @@ void FADASNode::growIndexFuzzy(unordered_map<FADASNode *, NODE_RECORDER> &naviga
     children.resize(power_2[chosen_num]);
     for(int i=0;i<power_2[chosen_num];++i){
         if(nodes[i].size <= 0)  continue;
-        else if(nodes[i].pid == -1) {
+        else if(nodes[i].size > Const::th || nodes[i].pid == -1) {
             children[i] = new FADASNode(this, nodes[i].size, i);
             generateSaxAndCardinality(children[i], i);
             children[i]->offsets.resize(nodes[i].size);

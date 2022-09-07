@@ -41,6 +41,8 @@ public:
 
     static void doExprWithResFADAS(FADASNode *root, vector<vector<int>> *g, const string &index_dir);
 
+    static void ngSearchDumpy(FADASNode *root, vector<vector<int>> *g);
+
     static void exactSearchFADAS(FADASNode *root, vector<vector<int>> *g);
 
     static void exactSearchFADASDTW(FADASNode *root, vector<vector<int>>*g);
@@ -80,6 +82,8 @@ public:
     static void approxDTWTARDISORIGIN(TARGNode *root);
 
     static void exactSearchTARDISORIGINDTW(TARGNode *root);
+
+    static void completeWorkload();
 };
 
 
