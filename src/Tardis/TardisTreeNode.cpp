@@ -541,6 +541,33 @@ int TardisTreeNode::getLeafNodeNumber(TardisTreeNode * root){
     return sum;
 }
 
+void TardisTreeNode::getBoundRange(double *sum, double *sum_square, int *leafNum, double *sum_dist) {
+    for(auto& iter:*children){
+        auto child = iter.second;
+        if(child == nullptr)    continue;
+        if(layer == 0 && child->size <= Const::th)  continue;
+        if(child->size > Const::th){
+            child->getBoundRange(sum, sum_square, leafNum, sum_dist);
+        }else{
+            assert(child->layer>1);
+            *leafNum += 1;
+
+            double dist = 0;
+            for(int j=0; j < Const::segmentNum; ++j){
+                double lb, ub;
+                SaxUtil::getValueRange(child->sax[j], child->layer, &lb, &ub);
+                if(lb == -numeric_limits<double>::max())    lb = -4;
+                if(ub == numeric_limits<double>::max()) ub = 4;
+                *sum += (ub - lb);
+                *sum_square += ((ub-lb) * (ub -lb));
+                dist += Const::tsLengthPerSegment * ((ub-lb) * (ub -lb));
+            }
+            *sum_dist += sqrt(dist);
+        }
+    }
+}
+
+
 void TardisTreeNode::getLeafNodeSize(TardisTreeNode * root, ofstream &f){
     if(root == nullptr) return;
     if(root->size <= Const::th){
@@ -636,6 +663,13 @@ void TardisTreeNode::getIndexStats(){
     cout << "Max. height = " << getHeight(this) - 1 <<endl;
     cout << "Avg. Height = " << (double)getSumHeight(this) / (double) total_leaf_node_num << endl;
     cout <<"Avg. Filling Factor = "<< total_size / (double)total_leaf_node_num / Const::th << endl;
+    double sum = 0, sum_square  = 0, sum_dist = 0;
+    int deep_leaf_num = 0;
+    getBoundRange(&sum, &sum_square, &deep_leaf_num, &sum_dist);
+    cout << "deep layer leaf number = " << deep_leaf_num <<endl;
+    cout << "total sum = " << sum <<", avg sum = " << sum / deep_leaf_num << endl;
+    cout << "total sum_square = " << sum_square << ", avg sum square = " << sum_square / deep_leaf_num << endl;
+    cout << "total sum_distance = " << sum_dist << ", avg sum dist = " << sum_dist / deep_leaf_num << endl;
     outfile.close();
 }
 

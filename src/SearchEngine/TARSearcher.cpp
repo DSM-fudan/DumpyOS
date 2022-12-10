@@ -9,6 +9,7 @@
 #include "../../include/DataStructures/TimeSeries.h"
 
 static int target_pack;
+extern int LOADED_NODE_CNT, LOADED_PACK_CNT;
 
 vector<PqItemSeries *> * TARSearcher::approxSearch(TARGNode *root, float *query, int k, const string &index_dir) {
     auto sax = SaxUtil::saxFromTs(query, Const::tsLengthPerSegment, Const::segmentNum, Const::cardinality);
@@ -89,6 +90,7 @@ vector<PqItemSeries *> * TARSearcher::approxIncSearch(TARGNode *root, float *que
     {
         string file_name = Const::tardisfn + to_string(pid);
         TARLNode* l_root = TARLNode::loadFromDisk(file_name);
+        ++LOADED_PACK_CNT;
         incSearchLocal(l_root, heap, k, query, node_num, query_invsax_str);
         l_root->deleteDescendants();
         delete l_root;
@@ -101,6 +103,7 @@ vector<PqItemSeries *> * TARSearcher::approxIncSearch(TARGNode *root, float *que
                     }else {
                         file_name = Const::tardisfn + to_string(iter.second->pid);
                         l_root = TARLNode::loadFromDisk(file_name);
+                        ++LOADED_PACK_CNT;
                         incSearchLocal(l_root, heap, k, query, node_num, query_invsax_str);
                         l_root->deleteDescendants();
                         delete l_root;
@@ -168,12 +171,11 @@ struct PqItemTAR{
         if(node == pt.node) return false;
         else {
             if(dist != pt.dist) return dist < pt.dist;
-            else return node < pt.node;
+            else return node->pid < pt.node->pid;
         }
     }
 };
 
-extern int LOADED_NODE_CNT;
 vector<PqItemSeries *> * TARSearcher::exactSearch(TARGNode *root, float *query, int k, const string &index_dir){
     auto heap = approxSearch(root, query, k, index_dir);
     make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
@@ -187,7 +189,9 @@ vector<PqItemSeries *> * TARSearcher::exactSearch(TARGNode *root, float *query, 
     PqItemTAR cur;
     while(!pq.empty()){
         cur = *pq.begin();
-        if(cur.dist > bsf)  break;
+        if(cur.node->pid == target_pack)  continue;
+        if(cur.dist > bsf)
+            break;
         pq.erase(pq.begin());
         if(!cur.node->children.empty()){
             for(auto &iter:cur.node->children)
@@ -211,6 +215,7 @@ vector<PqItemSeries *> * TARSearcher::exactSearch(TARGNode *root, float *query, 
             string file_name = Const::tardisfn + to_string(cur.node->pid);
             TARLNode* l_root = TARLNode::loadFromDisk(file_name);
             exactSearchLocal(l_root, heap, k ,query);
+            ++LOADED_PACK_CNT;
             LOADED_NODE_CNT += l_root->getLeafNodeNbr();
             bsf = (*heap)[0]->dist;
             l_root->deleteDescendants();
@@ -222,6 +227,62 @@ vector<PqItemSeries *> * TARSearcher::exactSearch(TARGNode *root, float *query, 
     sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
     return heap;
 }
+
+vector<PqItemSeries *> * TARSearcher::ngSearch(TARGNode *root, float *query, int k, const string &index_dir, int nprobe){
+    auto heap = approxSearch(root, query, k, index_dir);
+    int nvisited = 0;
+    ++nvisited;
+    if(nvisited >= nprobe)  return heap;
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+    unordered_set<int>visited;
+    set<PqItemTAR>pq;
+    pq.insert(PqItemTAR(root, 0));
+
+    PqItemTAR cur;
+    while(!pq.empty() && nvisited < nprobe){
+        cur = *pq.begin();
+        if(cur.node->pid == target_pack)    continue;
+        if(cur.dist > bsf)
+            break;
+        pq.erase(pq.begin());
+        if(!cur.node->children.empty()){
+            for(auto &iter:cur.node->children)
+                // leaf node
+                if(iter.second->children.empty()){
+                    if(visited.contains(iter.second->pid) || iter.second->pid == target_pack)   continue;
+                    pq.insert(PqItemTAR(iter.second, cur.dist));
+                    visited.insert(iter.second->pid);
+                } else{ // internal node
+                    string invsax_str = iter.second->invSAX;
+                    auto invsax = SaxUtil::str2Invsax(invsax_str);
+                    auto sax = SaxUtil::invSax2Sax(invsax, iter.second->layer);
+                    double lb_dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, sax, iter.second->layer);
+                    if(lb_dist < bsf){
+                        pq.insert(PqItemTAR(iter.second, lb_dist));
+                    }
+                    delete []sax;
+                    delete[] invsax;
+                }
+        }else{
+            string file_name = Const::tardisfn + to_string(cur.node->pid);
+            TARLNode* l_root = TARLNode::loadFromDisk(file_name);
+            exactSearchLocal(l_root, heap, k ,query);
+//            LOADED_NODE_CNT += l_root->getLeafNodeNbr();
+            ++nvisited;
+            bsf = (*heap)[0]->dist;
+            l_root->deleteDescendants();
+            delete l_root;
+        }
+    }
+    pq.clear();
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+}
+
 
 vector<PqItemSeries *> * TARSearcher::exactSearchDTW(TARGNode *root, float *query, int k, const string &index_dir){
     auto heap = approxSearch(root, query, k, index_dir);

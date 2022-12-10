@@ -68,7 +68,7 @@ void TARGNode::partition(TARGNode*root, long series_num){
 
     while(rest > 0) {
         long num;
-        if (rest > Const::fbl_series_num) num = buffer_num;
+        if (rest > buffer_num) num = buffer_num;
         else num = rest;
         auto *tss = new float[num * Const::tsLength];
         rest -= num;
@@ -393,6 +393,7 @@ unsigned * TARGNode::loadSampling(){
         }
 
         cur+=take_num;
+        Const::logPrint(to_string(cur) + " series have been read.");
         rest-=num;
         delete[] tss;
     }

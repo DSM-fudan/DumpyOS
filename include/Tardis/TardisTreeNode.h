@@ -136,6 +136,8 @@ public:
     void exactSearchKnn(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, int &node_number) const;
 
     void getLeafNodeSize(TardisTreeNode *root, ofstream &f);
+
+    void getBoundRange(double *sum, double *sum_square, int *leafNum, double *sum_dist);
 };
 
 

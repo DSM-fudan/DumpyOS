@@ -10,13 +10,14 @@
 #include <vector>
 #include <cmath>
 #include <cassert>
+//#include <immintrin.h>
 using namespace std;
 
 std::string SaxUtil::breakpointsFile = "../breakpoints.txt";
 std::string SaxUtil::SEPARATOR = " |\t|\n|,";
 double *SaxUtil::bp8 = new double[256]{-2.660067468617458,-2.4175590162365035,-2.2662268092096522,-2.1538746940614573,-2.063527898316245,-1.9874278859298962,-1.921350774293703,-1.8627318674216515,-1.8098922384806087,-1.7616704103630665,-1.7172281175057411,-1.6759397227734438,-1.637325382768064,-1.601008664886076,-1.5666885860684134,-1.534120544352546,-1.5031029431292737,-1.4734675779471014,-1.4450725798180746,-1.4177971379962677,-1.3915374879959008,-1.3662038163720984,-1.341717841080254,-1.318010897303537,-1.2950224067058147,-1.2726986411905359,-1.2509917154625454,-1.229858759216589,-1.209261231709155,-1.189164350199337,-1.169536610207143,-1.1503493803760083,-1.131576558386188,-1.113194277160929,-1.0951806527613883,-1.0775155670402805,-1.0601804794353549,-1.0431582633184537,-1.0264330631379108,-1.0099901692495823,-0.993815907860883,-0.9778975439405418,-0.9622231952954206,-0.946781756301046,-0.9315628300071148,-0.9165566675331128,-0.9017541138301002,-0.8871465590188762,-0.8727258946270402,-0.858484474141832,-0.8444150773752572,-0.8305108782053992,-0.8167654153150912,-0.8031725655979178,-0.7897265199432658,-0.7764217611479275,-0.7632530437325706,-0.7502153754679404,-0.7373040004386545,-0.7245143834923653,-0.711842195939419,-0.69928330238322,-0.6868337485747303,-0.6744897501960819,-0.6622476824884141,-0.6501040706479954,-0.6380555809225171,-0.6260990123464211,-0.6142312890602454,-0.6024494531644237,-0.5907506580628189,-0.5791321622555561,-0.5675913235445692,-0.5561255936186916,-0.5447325129881759,-0.5334097062412806,-0.5221548775980015,-0.5109658067382474,-0.4998403448837353,-0.4887764111146696,-0.4777719889038861,-0.46682512285258965,-0.4559339156131388,-0.44509652498551644,-0.4343111611752096,-0.42357608420119974,-0.41288960144365433,-0.40225006532172536,-0.3916558710925915,-0.3811054547635565,-0.3705972911096293,-0.36012989178956945,-0.3497018035538953,-0.3393116065388173,-0.3289579126404911,-0.31863936396437526,-0.30835463134483726,-0.2981024129304869,-0.2878814328310118,-0.27769043982157676,-0.2675282061010972,-0.25739352610093835,-0.24728521534080486,-0.2372021093287877,-0.22714306250271535,-0.2171069472101298,-0.2070926527243603,-0.19709908429431236,-0.18712516222572084,-0.17716982099173986,-0.16723200837085014,-0.15731068461017073,-0.14740482161235488,-0.13751340214433597,-0.12763541906627035,-0.11776987457909531,-0.10791577948918657,-0.0980721524886611,-0.08823801944992447,-0.07841241273311222,-0.06859437050511813,-0.05878293606894307,-0.04897715720213194,-0.03917608550309764,-0.02937877574415705,-0.019584285230126924,-0.009791673161345348,0.0,0.009791673161345348,0.019584285230126924,0.02937877574415705,0.03917608550309764,0.04897715720213194,0.05878293606894307,0.06859437050511813,0.07841241273311222,0.08823801944992447,0.0980721524886611,0.10791577948918657,0.11776987457909531,0.12763541906627035,0.13751340214433597,0.14740482161235488,0.15731068461017073,0.16723200837085014,0.17716982099173986,0.18712516222572084,0.19709908429431236,0.2070926527243603,0.2171069472101298,0.22714306250271535,0.2372021093287877,0.24728521534080486,0.25739352610093835,0.2675282061010972,0.27769043982157676,0.2878814328310118,0.2981024129304869,0.30835463134483726,0.31863936396437526,0.3289579126404911,0.3393116065388173,0.3497018035538953,0.36012989178956945,0.3705972911096293,0.3811054547635565,0.3916558710925915,0.40225006532172536,0.41288960144365433,0.42357608420119974,0.4343111611752096,0.44509652498551644,0.4559339156131388,0.46682512285258965,0.4777719889038861,0.4887764111146696,0.4998403448837353,0.5109658067382474,0.5221548775980015,0.5334097062412806,0.5447325129881759,0.5561255936186916,0.5675913235445692,0.5791321622555561,0.5907506580628189,0.6024494531644237,0.6142312890602454,0.6260990123464211,0.6380555809225171,0.6501040706479954,0.6622476824884141,0.6744897501960819,0.6868337485747303,0.69928330238322,0.711842195939419,0.7245143834923653,0.7373040004386545,0.7502153754679404,0.7632530437325706,0.7764217611479275,0.7897265199432658,0.8031725655979178,0.8167654153150912,0.8305108782053992,0.8444150773752572,0.858484474141832,0.8727258946270402,0.8871465590188762,0.9017541138301002,0.9165566675331128,0.9315628300071148,0.946781756301046,0.9622231952954206,0.9778975439405418,0.993815907860883,1.0099901692495823,1.0264330631379108,1.0431582633184537,1.0601804794353549,1.0775155670402805,1.0951806527613883,1.113194277160929,1.131576558386188,1.1503493803760083,1.169536610207143,1.189164350199337,1.209261231709155,1.229858759216589,1.2509917154625454,1.2726986411905359,1.2950224067058147,1.318010897303537,1.341717841080254,1.3662038163720984,1.3915374879959008,1.4177971379962677,1.4450725798180746,1.4734675779471014,1.5031029431292737,1.534120544352546,1.5666885860684134,1.601008664886076,1.637325382768064,1.6759397227734438,1.7172281175057411,1.7616704103630665,1.8098922384806087,1.8627318674216515,1.921350774293703,1.9874278859298962,2.063527898316245,2.1538746940614573,2.2662268092096522,2.4175590162365035,2.660067468617458, numeric_limits<float>::max()};
 double* SaxUtil::breakpoints = readDoubleFromFileAtOnce(SaxUtil::breakpointsFile);
-
+float* SaxUtil::breakpoints_f = readFloatFromFileAtOnce(SaxUtil::breakpointsFile);
 
 std::vector<std::string> split(std::string& str, std::string pattern)
 {
@@ -52,13 +53,39 @@ double* SaxUtil::readFromstring(string str) {
     return ret;
 }
 
+float* SaxUtil::readFromstringFloat(string str) {
+    vector<string> strings = split(str, ",");
+    auto* ret = new float[strings.size()];
+
+    for (int i = 0; i < strings.size(); i++) {
+        string s = strings[i];
+        string::size_type size_type;
+        if (s.length() > 0)
+            ret[i] = stof(s, &size_type);
+    }
+
+    return ret;
+}
+
 double* SaxUtil::readDoubleFromFileAtOnce(const string& fileName){
 
     string line;
     std::ifstream fin(fileName);
     getline(fin, line);
 
-    return readFromstring(line);
+    auto ret = readFromstring(line);
+    fin.close();
+    return ret;
+}
+
+float* SaxUtil::readFloatFromFileAtOnce(const string& fileName){
+
+    string line;
+    std::ifstream fin(fileName);
+    getline(fin, line);
+
+    auto ret = readFromstringFloat(line);
+    return ret;
 }
 
 void SaxUtil::id2Sax(int id, int*sax, int segment_num){
@@ -604,11 +631,11 @@ double SaxUtil::LowerBound_Paa_iSax(const float *paa, const unsigned short *sax,
 
     for (int i = Const::segmentNum-1; i >= 0; --i) {
         paaValue = paa[i];
-        if(chosen_segs[cur] == i){
+        if(cur >=0 && chosen_segs[cur] == i){
             saxValue = (sax[i] << 1) + (new_id % 2);
             new_id >>= 1;
             bc = bits_cardinality[i] + 1;
-            ++cur;
+            --cur;
         } else {
             saxValue = sax[i];
             bc = bits_cardinality[i];
@@ -677,6 +704,171 @@ double SaxUtil::LowerBound_Paa_iSax(const float *paa, const unsigned short *sax,
     } // for
 
     return frontCoef * sum;
+}
+
+// complete SAX word, bits cardinality <= 8, #segments = 16
+//double  SaxUtil::LowerBound_Paa_iSax_SIMD(const float *paa, unsigned char *sax_short, unsigned char *bits_cardinality_short)
+//{
+//
+//    int region_upper[16],region_lower[16];
+//    float distancef[16];
+//    int offset = Const::offset;
+//
+//    __m256i vectorsignbit = _mm256_set1_epi32 (0xffffffff);
+//    __m256i vloweroffset = _mm256_set1_epi32 (offset-1);
+//    __m256i vupperoffset = _mm256_set1_epi32 (offset);
+//
+//    //__m256i c_cv_0 = _mm256_set_epi32 ( sax_cardinalities[7] , sax_cardinalities[6] ,sax_cardinalities[5] ,sax_cardinalities[4] , sax_cardinalities[3] ,sax_cardinalities[2] ,sax_cardinalities[1],sax_cardinalities[0]);
+//    //__m256i c_cv_1 = _mm256_set_epi32 ( sax_cardinalities[15], sax_cardinalities[14],sax_cardinalities[13],sax_cardinalities[12], sax_cardinalities[11],sax_cardinalities[10],sax_cardinalities[9],sax_cardinalities[8]);
+////    __m256i sax_cardinalitiesv16 = _mm256_lddqu_si256((const __m256i*)bits_cardinality);
+//    __m128i sax_cardinalitiesv8 = _mm_lddqu_si128 ((const __m128i*)bits_cardinality_short);
+//    __m256i sax_cardinalitiesv16= _mm256_cvtepu8_epi16 (sax_cardinalitiesv8);
+//    __m128i sax_cardinalitiesv16_0=_mm256_extractf128_si256 (sax_cardinalitiesv16,0);
+//    __m128i sax_cardinalitiesv16_1=_mm256_extractf128_si256 (sax_cardinalitiesv16,1);
+//    __m256i bits_cardinality_0 = _mm256_cvtepu16_epi32 (sax_cardinalitiesv16_0);
+//    __m256i bits_cardinality_1 = _mm256_cvtepu16_epi32 (sax_cardinalitiesv16_1);
+//
+//    //__m256i v_0    = _mm256_set_epi32 (sax[7],sax[6],sax[5],sax[4],sax[3],sax[2],sax[1],sax[0]);
+//    //__m256i v_1    = _mm256_set_epi32 (sax[15],sax[14],sax[13],sax[12],sax[11],sax[10],sax[9],sax[8]);
+//    __m128i saxv8= _mm_lddqu_si128 ((const __m128i*)sax_short);
+//    __m256i saxv16= _mm256_cvtepu8_epi16 (saxv8);
+//    __m128i saxv16_0 =_mm256_extractf128_si256 (saxv16,0);
+//    __m128i saxv16_1=_mm256_extractf128_si256 (saxv16,1);
+//    __m256i sax_0= _mm256_cvtepu16_epi32 (saxv16_0);
+//    __m256i sax_1 = _mm256_cvtepu16_epi32 (saxv16_1);
+//
+//
+//    __m256i c_m    = _mm256_set1_epi32 (Const::bitsCardinality);
+//    __m256i rest_bits_card_0 = _mm256_sub_epi32 (c_m, bits_cardinality_0);
+//    __m256i rest_bits_card_1 = _mm256_sub_epi32 (c_m, bits_cardinality_1);
+//
+//    __m256i region_lowerv_0 = _mm256_sllv_epi32 (sax_0, rest_bits_card_0);
+//    __m256i region_lowerv_1 = _mm256_sllv_epi32 (sax_1, rest_bits_card_1);
+//
+//
+//    __m256i v1= _mm256_set1_epi32 ((int)0x7f800000);
+//
+//    __m256i region_upperv_0 = _mm256_sllv_epi32 (v1, rest_bits_card_0);
+//    __m256i region_upperv_1 = _mm256_sllv_epi32 (v1, rest_bits_card_1);
+//    region_upperv_0 = _mm256_andnot_si256 (region_upperv_0, vectorsignbit);
+//    region_upperv_1 = _mm256_andnot_si256 (region_upperv_1, vectorsignbit);
+//
+//    region_upperv_0 = _mm256_or_si256 (region_upperv_0, region_lowerv_0);
+//
+//    region_upperv_1 = _mm256_or_si256 (region_upperv_1, region_lowerv_1);
+//
+//    region_lowerv_0 = _mm256_add_epi32 (region_lowerv_0, vloweroffset);
+//    region_lowerv_1 = _mm256_add_epi32 (region_lowerv_1, vloweroffset);
+//    region_upperv_0 = _mm256_add_epi32 (region_upperv_0, vupperoffset);
+//    region_upperv_1 = _mm256_add_epi32 (region_upperv_1, vupperoffset);
+//    _mm256_storeu_si256 ((__m256i*)&(region_lower[0]),region_lowerv_0);
+//    _mm256_storeu_si256 ((__m256i*)&(region_lower[8]),region_lowerv_1);
+//    _mm256_storeu_si256 ((__m256i*)&(region_upper[0]),region_upperv_0);
+//    _mm256_storeu_si256 ((__m256i*)&(region_upper[8]),region_upperv_1);
+//
+//
+//    //lower
+//
+//    __m256i lower_juge_zerov_0 = _mm256_cmpeq_epi32 (region_lowerv_0, _mm256_setzero_si256 ());
+//    __m256i lower_juge_zerov_1 = _mm256_cmpeq_epi32 (region_lowerv_1, _mm256_setzero_si256 ());
+//
+//    __m256i lower_juge_nzerov_0 = _mm256_andnot_si256 (lower_juge_zerov_0, vectorsignbit);
+//    __m256i lower_juge_nzerov_1 = _mm256_andnot_si256 (lower_juge_zerov_1, vectorsignbit);
+//
+//    __m256 minvalv = _mm256_set1_ps (-1000);
+//
+//    __m256 lsax_breakpoints_shiftv_0 =_mm256_i32gather_ps (breakpoints_f,region_lowerv_0, 4);
+//    __m256 lsax_breakpoints_shiftv_1 =_mm256_i32gather_ps (breakpoints_f,region_lowerv_1, 4);
+//
+//
+//    __m256 breakpoint_lowerv_0 = (__m256)_mm256_or_si256 (_mm256_and_si256(lower_juge_zerov_0,(__m256i)minvalv),_mm256_and_si256(lower_juge_nzerov_0,(__m256i)lsax_breakpoints_shiftv_0));
+//    __m256 breakpoint_lowerv_1 = (__m256)_mm256_or_si256 (_mm256_and_si256(lower_juge_zerov_1,(__m256i)minvalv),_mm256_and_si256(lower_juge_nzerov_1,(__m256i)lsax_breakpoints_shiftv_1));
+//
+//    //upper
+//    __m256 usax_breakpoints_shiftv_0 =_mm256_i32gather_ps (breakpoints_f,region_upperv_0, 4);
+//    __m256 usax_breakpoints_shiftv_1 =_mm256_i32gather_ps (breakpoints_f,region_upperv_1, 4);
+//
+//    __m256i upper_juge_maxv_0 = _mm256_cmpeq_epi32 (region_upperv_0,  _mm256_set1_epi32 (Const::bitsCardinality - 1));
+//    __m256i upper_juge_maxv_1 = _mm256_cmpeq_epi32 (region_upperv_1,  _mm256_set1_epi32 (Const::bitsCardinality - 1));
+//
+//    __m256i upper_juge_nmaxv_0 = _mm256_andnot_si256 (upper_juge_maxv_0, vectorsignbit);
+//    __m256i upper_juge_nmaxv_1 = _mm256_andnot_si256 (upper_juge_maxv_1, vectorsignbit);
+//
+//    __m256 breakpoint_upperv_0 = (__m256)_mm256_or_si256 (_mm256_and_si256(upper_juge_maxv_0,(__m256i)_mm256_set1_ps (1000)),_mm256_and_si256(upper_juge_nmaxv_0,(__m256i)usax_breakpoints_shiftv_0));
+//    __m256 breakpoint_upperv_1 = (__m256)_mm256_or_si256 (_mm256_and_si256(upper_juge_maxv_1,(__m256i)_mm256_set1_ps (1000)),_mm256_and_si256(upper_juge_nmaxv_1,(__m256i)usax_breakpoints_shiftv_1));
+//
+//    //dis
+//    __m256 paav_0,paav_1;
+//
+//
+//
+//    paav_0 =_mm256_loadu_ps (paa);
+//    paav_1 =_mm256_loadu_ps (&(paa[8]));
+//
+//    __m256 dis_juge_upv_0=_mm256_cmp_ps (breakpoint_lowerv_0, paav_0, _CMP_GT_OS);
+//    __m256 dis_juge_upv_1=_mm256_cmp_ps (breakpoint_lowerv_1, paav_1, _CMP_GT_OS);
+//
+//    __m256 dis_juge_lov_0=(__m256)_mm256_and_si256 ((__m256i)_mm256_cmp_ps (breakpoint_lowerv_0, paav_0, _CMP_NGT_US),(__m256i)_mm256_cmp_ps (breakpoint_upperv_0, paav_0, _CMP_LT_OS))  ;
+//    __m256 dis_juge_lov_1=(__m256)_mm256_and_si256 ((__m256i)_mm256_cmp_ps (breakpoint_lowerv_1, paav_1, _CMP_NGT_US),(__m256i)_mm256_cmp_ps (breakpoint_upperv_1, paav_1, _CMP_LT_OS));
+//
+//    __m256 dis_juge_elv_0=(__m256)_mm256_andnot_si256 (_mm256_or_si256 ((__m256i)dis_juge_upv_0, (__m256i)dis_juge_lov_0),vectorsignbit);
+//    __m256 dis_juge_elv_1=(__m256)_mm256_andnot_si256 (_mm256_or_si256 ((__m256i)dis_juge_upv_1, (__m256i)dis_juge_lov_1),vectorsignbit);
+//
+//    __m256 dis_lowv_0 =_mm256_sub_ps (breakpoint_lowerv_0, paav_0);
+//    __m256 dis_lowv_1 =_mm256_sub_ps (breakpoint_lowerv_1, paav_1);
+//    __m256 dis_uppv_0 =_mm256_sub_ps (breakpoint_upperv_0, paav_0);
+//    __m256 dis_uppv_1 =_mm256_sub_ps (breakpoint_upperv_1, paav_1);
+//
+//
+//    __m256 distancev_0=(__m256)_mm256_or_si256(_mm256_or_si256(_mm256_and_si256((__m256i)dis_juge_upv_0,(__m256i)dis_lowv_0),_mm256_and_si256((__m256i)dis_juge_lov_0,(__m256i)dis_uppv_0)),_mm256_and_si256((__m256i)dis_juge_elv_0,(__m256i)_mm256_set1_ps (0.0)));
+//    __m256 distancev_1=(__m256)_mm256_or_si256(_mm256_or_si256(_mm256_and_si256((__m256i)dis_juge_upv_1,(__m256i)dis_lowv_1),_mm256_and_si256((__m256i)dis_juge_lov_1,(__m256i)dis_uppv_1)),_mm256_and_si256((__m256i)dis_juge_elv_1,(__m256i)_mm256_set1_ps (0.0)));
+//
+//
+//    __m256 distancesum_0 = _mm256_dp_ps (distancev_0, distancev_0, 0xff);
+//    __m256 distancesum_1 = _mm256_dp_ps (distancev_1, distancev_1, 0xff);
+//    __m256 distancevf = _mm256_add_ps (distancesum_0, distancesum_1);
+//
+//    _mm256_storeu_ps (distancef ,distancevf);
+//
+//    double frontCoef = (double)Const::tsLength / Const::segmentNum; // n / w
+//
+//    return (distancef[0]+distancef[4])*frontCoef ;
+//}
+
+//double SaxUtil::LowerBound_Paa_iSax_SIMD(const float *paa, const unsigned short *sax, const int* bits_cardinality, vector<int>&chosen_segs, int new_id) {
+//    unsigned char bits_cardinality_short[16] __attribute__((aligned(32)));
+//    unsigned char sax_short[16] __attribute__((aligned(32)));
+//    int cur = chosen_segs.size() - 1;
+//
+//    for(int i = Const::segmentNum - 1; i >= 0; --i){
+//        if(cur >=0 && chosen_segs[cur] == i){
+//            sax_short[i] = (sax[i] << 1) + (new_id % 2);
+//            new_id >>= 1;
+//            bits_cardinality_short[i] = bits_cardinality[i] + 1;
+//            --cur;
+//        } else {
+//            sax_short[i] = sax[i];
+//            bits_cardinality_short[i] = bits_cardinality[i];
+//        }
+//    }
+//    return LowerBound_Paa_iSax_SIMD(paa, sax_short, bits_cardinality_short);
+//}
+
+
+double SaxUtil::getMinDist1stLayer(const float *paa, int id){
+    double ret = 0;
+    double frontCoef = (double)Const::tsLength / Const::segmentNum; // n / w
+    for(int i=Const::segmentNum-1;i>=0;--i){
+        if(id %2 == 1){
+            if(paa[i] <0)
+                ret += (paa[i] * paa[i]);
+        }else{
+            if(paa[i] > 0)
+                ret += (paa[i] * paa[i]);
+        }
+        id >>=1;
+    }
+    return frontCoef * ret;
 }
 
 //double SaxUtil::LowerBound_Paa_iSax(const double *paa, const int *sax, const int* bits_cardinality) {
@@ -845,6 +1037,24 @@ int SaxUtil::extendSax(const unsigned short *sax, const int *bits_cardinality) {
     return res;
 }
 
+void SaxUtil::extendSax(const unsigned short * parent_sax, const int*parent_bits_cardinality,
+                          vector<int> &chosen_segs, int new_id,
+               unsigned short* sax, int *bits_cardinality) {
+    int cur = chosen_segs.size() - 1;
+
+    for (int i = Const::segmentNum - 1; i >= 0; --i) {
+        if (cur >= 0 && chosen_segs[cur] == i) {
+            sax[i] = (parent_sax[i] << 1) + (new_id % 2);
+            new_id >>= 1;
+            bits_cardinality[i] = parent_bits_cardinality[i] + 1;
+            --cur;
+        } else {
+            sax[i] = parent_sax[i];
+            bits_cardinality[i] = parent_bits_cardinality[i];
+        }
+    }
+}
+
 int SaxUtil::getNewId(const float *paa, const float *split_line){
     int ret = 0;
     for(int i=0;i<Const::segmentNum;++i){
@@ -869,6 +1079,7 @@ void SaxUtil::saxPrint(int* sax, int bits_cardinality, int segment_num)
     for (i=0; i < segment_num; i++) {
         cout<<i << "\t";
         printBinary(sax[i], bits_cardinality);
+        cout <<"\t" << sax[i];
         cout<<endl;
     }
     cout<<endl;
@@ -925,6 +1136,8 @@ void SaxUtil::generatePaaFile(const string &fn, const string &output) {
     float paa[Const::segmentNum];
     FILE *f = fopen(fn.c_str(), "rb");
     FILE *of = fopen(output.c_str(), "wb");
+    float paa_max[Const::segmentNum];
+    fill_n(paa_max, Const::segmentNum, 0);
     for(int i=0;i<num;++i){
         if(i % 1000000 == 0)    cout << i << endl;
         fread(ts, sizeof(float ), Const::tsLength, f);
@@ -933,6 +1146,8 @@ void SaxUtil::generatePaaFile(const string &fn, const string &output) {
             cout << i << "," <<endl;
         }
         else    paaFromTs(ts, paa, Const::tsLengthPerSegment, Const::segmentNum);
+        for(int j=0;j<Const::segmentNum;++j)
+            paa_max[j] = max(paa_max[j], paa[j]);
         fwrite(paa, sizeof(float ), Const::segmentNum, of);
     }
     fclose(f);

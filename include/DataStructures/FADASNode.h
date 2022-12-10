@@ -124,10 +124,10 @@ class FADASNode {
     void fuzzy(partUnit *part_units, vector<int> &actual_sizes, vector<vector<int>> &node_offsets,
                vector<vector<int>> &series_index_list, int chosen_num,
                unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl) const;
-    void fuzzySeriesInPartUnitInFirstLayer(partUnit *part_units, vector<int> &node_offsets, int _id,
+    void fuzzySeriesInPartUnitInFirstLayer(vector<partUnit> &part_units, vector<int> &node_offsets, int _id,
                                            unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl,
                                            vector<vector<double >> &paa_mu_part_units) const;
-    void fuzzyFirstLayer(partUnit *part_units, const int *nav_ids,
+    void fuzzyFirstLayer(vector<partUnit> &part_units, const int *nav_ids,
                          unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl,
                          vector<vector<double>> &paa_mu_part_units) const;
 
@@ -146,6 +146,8 @@ public:
     static unsigned short *saxes;
     static float *paas;
     static int a,b,c;
+    static int*** combines;
+    static int * combine_num;
 
     vector<int>pos_cache;
     unsigned short sax[Const::segmentNum]{};
@@ -183,9 +185,13 @@ public:
     [[nodiscard]] bool isInternalNode() const {return  size > Const::th;}
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                 float *query_reordered, int *ordering) const;
+    void search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
+                                float *query_reordered, int *ordering) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                 std::unordered_set<float *, createhash, isEqual> *hash_set) const;
+    void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,unordered_set<float*, createhash, isEqual>*hash_set,
+                           float *query_reordered, int *ordering) const;
 
     void search_offset(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
 
@@ -228,6 +234,8 @@ public:
     void growIndexWOPack();
 
     static int partitionLessPack(partUnit *nodes_map, int chosen_segment_number);
+
+    static int partitionNew(vector<partUnit>& nodes_map, int chosen_segment_number);
 
     static int partitionNew(partUnit* nodes_map, int chosen_segment_number);
 
@@ -286,6 +294,10 @@ public:
     void reorganize(float *tss, FADASNode *parent);
 
     void insertBatch(float *tss, int batch_size);
+
+    static void loadCombines();
+
+    void getBoundRange(double *sum, double *sum_square, int *leafNum, double *sum_dist);
 };
 
 struct NODE_RECORDER{

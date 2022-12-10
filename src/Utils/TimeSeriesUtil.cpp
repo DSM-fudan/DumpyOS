@@ -6,6 +6,7 @@
 #include "../../include/Utils/FileUtil.h"
 #include "../../include/DSTree/DSTreeNode.h"
 #include "../../include/Const.h"
+//#include <immintrin.h>
 #include <cmath>
 #include <cassert>
 #include <memory>
@@ -267,6 +268,67 @@ double TimeSeriesUtil::euclideanDist(float *query_reordered, float *ts, int size
     }
     return sum;
 }
+
+// size must be a multiple of 8
+//float TimeSeriesUtil::euclideanDist_SIMD(float * t, float * s, int size, float bound) {
+//    float distance = 0;
+//    int i =0;
+//    float distancef[8];
+//
+//    __m256 v_t,v_s,v_d,distancev;
+//    while (size > 0 && distance <bound) {
+//        v_t=_mm256_loadu_ps (&t[i]);
+//        v_s=_mm256_loadu_ps (&s[i]);
+//
+//        v_d= _mm256_sub_ps (v_t,v_s);
+//
+//        v_d=_mm256_mul_ps (v_d,v_d);
+//        size-=8;
+//
+//        i=i+8;
+//        distancev = _mm256_hadd_ps (v_d, v_d);
+//        distancev = _mm256_hadd_ps (distancev, distancev);
+//        _mm256_storeu_ps (distancef ,distancev);
+//        distance +=distancef[0]+distancef[4];
+//
+//    }
+//
+////    distance = sqrtf(distance);
+//
+//    return distance;
+//}
+
+//float TimeSeriesUtil::euclideanDist_SIMD(float *query_reordered, float *ts, int size, double bound, int *order) {
+//    float distance = 0;
+//    int i =0;
+//    float distancef[8];
+//    float t[size];
+//    for(int tmp = 0; tmp < size; ++tmp)
+//        t[tmp] = ts[order[tmp]];
+//
+//    __m256 v_t,v_s,v_d,distancev;
+//    while (size > 0 && distance <bound) {
+//        v_t=_mm256_loadu_ps (&t[i]);
+//        v_s=_mm256_loadu_ps (&query_reordered[i]);
+//
+//        v_d= _mm256_sub_ps (v_t,v_s);
+//
+//        v_d=_mm256_mul_ps (v_d,v_d);
+//        size-=8;
+//
+//        i=i+8;
+//        distancev = _mm256_hadd_ps (v_d, v_d);
+//        distancev = _mm256_hadd_ps (distancev, distancev);
+//        _mm256_storeu_ps (distancef ,distancev);
+//        distance +=distancef[0]+distancef[4];
+//
+//    }
+//
+////    distance = sqrtf(distance);
+//
+//    return distance;
+//}
+
 double TimeSeriesUtil::dtw(const float* A, const float* B, int len, int r, double bsf)
 {
 

@@ -88,6 +88,10 @@ public:
 
     static double euclideanDist(float *query_reordered, float *ts, int size, double bound, int *order);
 
+    static float euclideanDist_SIMD(float * t, float * s, int size, float bound);
+
+    static float euclideanDist_SIMD(float *query_reordered, float *ts, int size, double bound, int *order);
+
 //    static void knnWithBsf(const DSTreeNode &node, InsertedSeries &queryTs, int k, vector<PqItemSeriesVector *> &heap);
 //
 //    static vector<PqItemSeriesVector *> & knnVector(const DSTreeNode &node, InsertedSeries &q, int k);

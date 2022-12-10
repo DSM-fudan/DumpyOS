@@ -18,6 +18,7 @@ typedef struct dequeue
 class SaxUtil {
 public:
     static double* breakpoints;
+    static float* breakpoints_f;
     static string breakpointsFile;
     static string SEPARATOR;
     static double *bp8;
@@ -26,7 +27,11 @@ public:
 
     static double* readFromstring(string str);
 
+    static float* readFromstringFloat(string str);
+
     static double* readDoubleFromFileAtOnce(const string& fileName);
+
+    static float* readFloatFromFileAtOnce(const string& fileName);
 
     static double * paaFromTs(const float* ts, int tsLengthPerSegment, int segmentNum);
 
@@ -60,6 +65,12 @@ public:
     static void saxFromTs(const float *ts, unsigned short *sax, int tsLengthPerSegment, int segmentNum, int cardinality);
 
     static double LowerBound_Paa_iSax(const float *paa, const unsigned short *sax, int bits_cardinality);
+
+    static double  LowerBound_Paa_iSax_SIMD(const float *paa, unsigned char *sax_short, unsigned char *bits_cardinality_short);
+
+    static double LowerBound_Paa_iSax_SIMD(const float *paa, const unsigned short *sax, const int* bits_cardinality, vector<int>&chosen_segs, int new_i);
+
+    static double getMinDist1stLayer(const float *paa, int id);
 
     static int invSaxHead2FromSax(vector<int> *sax, int bitsCardinality, int segmentNum);
 
@@ -142,6 +153,11 @@ public:
 
     static double
     minidist_paa_to_isax_DTW(const double *paaU, const double *paaL, const unsigned short *sax, int bitsCardinality);
+
+    static void
+    extendSax(const unsigned short *parent_sax, const int *parent_bits_cardinality, vector<int> &chosen_segs,
+              int new_id,
+              unsigned short *sax, int *bits_cardinality);
 };
 
 

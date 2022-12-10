@@ -25,7 +25,7 @@ public:
     // sec:expr
     static string dataset, method;
     static int tsLength, maxK, index, ops, materialized, method_code, query_num, series_num, k, dtw_window_size,
-    batch_size, batch_num;
+    batch_size, batch_num, pre_read;
     static double dtw_window_percent;
 
     //sec: parameter
@@ -71,10 +71,6 @@ public:
         ops = reader.GetInteger("expr", "ops",-1);
         cout << "ops: " << ops<<endl;
 
-        tsLength = reader.GetInteger("expr", "tsLength", -1);
-        cout << "tsLength: " << tsLength << endl;
-        if(tsLength == -1)  exit(-1);
-
         maxK = reader.GetInteger("expr", "maxK", -1);
         cout << "maxK: " << maxK << endl;
         if(maxK == -1)  exit(-1);
@@ -93,6 +89,9 @@ public:
 
         batch_num = reader.GetInteger("expr", "batch_num", -1);
         cout << "batch_num: " << batch_num << endl;
+
+        pre_read = reader.GetInteger("expr", "pre_read", -1);
+        cout << "pre_read: " << pre_read << endl;
 
         dtw_window_percent = reader.GetReal("expr", "dtw_window_percent", -1);
         cout << "dtw_window_percent: " << dtw_window_percent << endl;
@@ -156,6 +155,10 @@ public:
 
         bitsReserve = reader.GetInteger("other", "bitsReserve", 6);
         cout << "bitsReserve: " << bitsReserve << endl;
+
+        tsLength = reader.GetInteger(dataset, "tsLength", -1);
+        cout << "tsLength: " << tsLength << endl;
+        if(tsLength == -1)  exit(-1);
 
         paafn = reader.Get(dataset, "paafn","");
         cout << "paafn: " << paafn <<endl;

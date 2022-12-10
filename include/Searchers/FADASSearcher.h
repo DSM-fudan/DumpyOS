@@ -10,10 +10,12 @@
 class FADASSearcher {
 public:
     static void approxSearchInterNode(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
-                                      vector<PqItemSeries *> *heap, const string &index_dir);
+                                      vector<PqItemSeries *> *heap, const string &index_dir,
+                                      float *query_reordered, int *ordering);
 
     static vector<PqItemSeries *> *
-    approxSearch(FADASNode *root, float *query, int k, vector<vector<int>> *g, const string &index_dir);
+    approxSearch(FADASNode *root, float *query, int k, vector<vector<int>> *g, const string &index_dir,
+                 float *query_reordered, int *ordering);
 
     static void approxSearchInterNodeDTW(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
                                                         vector<PqItemSeries *> *heap, const string &index_dir);
@@ -22,6 +24,10 @@ public:
                                                             const string &index_dir);
 
     static vector<PqItemSeries *> *exactSearch(FADASNode *root, float *query, int k, vector<vector<int>> *g);
+
+    static vector<PqItemSeries *> *
+    exactSearchIdLevel(FADASNode *root, float *query, int k, vector<vector<int>> *g, float *query_reordered,
+                       int *ordering);
 
     static vector<PqItemSeries*>* exactSearchDTW(FADASNode* root, float *query, int k, vector<vector<int>> *g);
 
@@ -42,7 +48,8 @@ public:
     approxSearchPos(FADASNode *root, float *query, int k, vector<vector<int>> *g, const string &index_dir);
 
     static vector<PqItemSeries *> *
-    approxIncSearch(FADASNode *root, float *query, int k, const string &index_dir, int node_num, float * query_reordered, int*ordering);
+    approxIncSearch(FADASNode *root, float *query, int k, const string &index_dir, int node_num,
+                    float *query_reordered, int *ordering, vector<vector<int>> *g);
 
     static
     vector<PqItemSeries *> *ngSearch(FADASNode *root, float *query, float *query_reordered, int *ordering, int k,
@@ -52,6 +59,12 @@ public:
     approxIncSearchInterNode(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
                              vector<PqItemSeries *> *heap, const string &index_dir,
                              int &node_num, float *query_reordered, int *ordering);
+
+    static void
+    approxIncSearchInterNode(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
+                             vector<PqItemSeries *> *heap, const string &index_dir,
+                             int &node_num, unordered_set<FADASNode*>&visit, float *query_reordered, int *ordering);
+
 
     static void approxIncSearchInterNodeFuzzy(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
                                        vector<PqItemSeries *> *heap, const string &index_dir, int &node_num,
@@ -73,6 +86,25 @@ public:
     static vector<PqItemSeries *> *
     ngSearchIdLevelNaive(FADASNode *root, float *query, float *query_reordered, int *ordering, int k,
                          vector<vector<int>> *g, int nprobes);
+
+    static void
+    approxSearchInner4IncSearch(FADASNode *root, TimeSeries *queryTs, int k, vector<PqItemSeries *> *heap,
+                                vector<vector<int>> *g, unsigned short *sax, const string &index_dir,
+                                float *query_reordered, int *ordering);
+    static
+    void approxIncSearchInner(FADASNode *root, float *query, int k, const string &index_dir, int node_num,
+                              vector<PqItemSeries *> *heap, TimeSeries *queryTs, unsigned short *sax,
+                              float *query_reordered, int *ordering, vector<vector<int>> *g);
+
+    static void
+    approxIncSearchInterNode(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
+                             vector<PqItemSeries *> *heap,
+                             const string &index_dir, int &node_num, unordered_set<FADASNode *> &visit,
+                             float *query_reordered, int *ordering,
+                             unordered_set<float *, createhash, isEqual> *hash_set);
+
+    static vector<PqItemSeries *> *
+    ngSearchFuzzy(FADASNode *root, float *query, float *query_reordered, int *ordering, int k,int nprobes);
 };
 
 

@@ -15,6 +15,8 @@
 
 unsigned short *FADASNode::saxes = nullptr;
 float *FADASNode::paas = nullptr;
+int *** FADASNode::combines = nullptr;
+int * FADASNode::combine_num = nullptr;
 int FADASNode::a = MathUtil::nChooseK(Const::segmentNum, 1), FADASNode::b = MathUtil::nChooseK(Const::segmentNum, 2), FADASNode::c = MathUtil::nChooseK(Const::segmentNum, 3);
 const int FADASNode::power_2[]{1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536};
 extern long SAX_PAA_CPU_TIME , SAX_PAA_READ_TIME ;
@@ -25,6 +27,39 @@ static long MAT1_CPU_TIME_STAT = 0, MAT1_CPU_TIME_COPY = 0, MAT1_WRITE_TIME = 0,
         GROW_CPU_TIME = 0,  GROW_CPU_TIME_1st = 0, GROW_TOTAL_TIME = 0, SMALL_FILES_BYTES_WRITE = 0, SMALL_FILES_BYTES_READ = 0,
         RAND_READ_CNT = 0, RAND_WRITE_CNT = 0, SEQ_READ_CNT = 0, SEQ_WRITE_CNT = 0,
         SAX_WRITE_TIME = 0;
+
+void FADASNode::loadCombines(){
+    string base = "../combines/" + to_string(Const::segmentNum) + "-";
+    auto ret = new int**[Const::segmentNum + 1];
+    combine_num = new int[Const::segmentNum];
+    ifstream ff("../combines/cnum-"+ to_string(Const::segmentNum) + ".txt", ios::in);
+    for(int i=0;i<Const::segmentNum;++i){
+        ff >> combine_num[i];
+    }
+    ff.close();
+
+    for(int i=1;i<=Const::segmentNum - 1;++i){
+        ret[i] = new int*[combine_num[i]];
+        ifstream f(base + to_string(i) + ".txt", ios::in);
+        for(int j=0;j<combine_num[i];++j){
+            ret[i][j] = new int[i];
+            for(int k=0;k<i;++k) {
+                f >> ret[i][j][k];
+//                cout << ret[i][j][k] << ",";
+            }
+//            cout << endl;
+        }
+//        cout << endl;
+        f.close();
+    }
+    ret[Const::segmentNum] = new int*[1];
+    ret[Const::segmentNum][0] = new int[Const::segmentNum];
+    for(int i=0;i<Const::segmentNum;++i){
+        ret[Const::segmentNum][0][i] = i;
+    }
+    combines = ret;
+
+}
 
 FADASNode* FADASNode::route(const unsigned short *_sax){
     if(!isInternalNode())
@@ -72,6 +107,7 @@ void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap,
         return;
     }
     double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
+    _search_num += size;
     string fn = index_dir+ getFileName();
     if(partition_id == -1)  fn += "_L";
 //    long fs = FileUtil::getFileSize(fn.c_str());
@@ -115,6 +151,59 @@ void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap,
     delete[]ts;
     fclose(f);
 }
+
+//void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
+//                       float *query_reordered, int *ordering) const{
+//    assert(!isInternalNode());
+//    if(query_reordered == nullptr || ordering == nullptr) {
+//        search(k, queryTs, heap, index_dir);
+//        return;
+//    }
+//    double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
+//    _search_num += size;
+//    string fn = index_dir+ getFileName();
+//    if(partition_id == -1)  fn += "_L";
+////    long fs = FileUtil::getFileSize(fn.c_str());
+////    int series_num = fs / Const::tsLengthBytes;
+////    assert(series_num == size);
+//
+//    FILE *f = fopen(fn.c_str(), "rb");
+//    struct timeval io{};
+//    Const::timer_start(&io);
+//    auto *ts = new float[size * Const::tsLength];
+////    for(int i=0;i<size;++i)
+////        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
+//    fread(ts, sizeof(float), size * Const::tsLength, f);
+//    READ_TIME += Const::timer_end(&io);
+//
+//    _search_num += size; ::layer = FADASNode::layer;
+//    for(int i=0;i<size;++i){
+////        struct timeval start{};
+////        Const::timer_start(&start);
+////        double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+//        double dist = TimeSeriesUtil::euclideanDist_SIMD(query_reordered, ts + i * Const::tsLength, Const::tsLength, bsf, ordering);
+////        DIST_CALC_TIME += Const::timer_end(&start);
+//
+//        if(heap.size() < k){
+//            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+//            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+//        }else if(dist < bsf){
+//            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+//            delete heap.back();
+//            heap.pop_back();
+//            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+//            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+//        }
+//
+//        if(heap.size() >= k)    bsf = heap[0]->dist;
+//    }
+//
+//    for(PqItemSeries*s: heap){
+//        if(s->needDeepCopy) s->copyData();
+//    }
+//    delete[]ts;
+//    fclose(f);
+//}
 
 void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
     assert(!isInternalNode());
@@ -269,6 +358,54 @@ void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap,
     for(int i=0;i<size;++i){
         if(hash_set->find(ts + i * Const::tsLength) != hash_set->end()) continue;
         double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+
+        if(heap.size() < k){
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            hash_set->insert(ts + i * Const::tsLength);
+        }else if(dist < bsf){
+            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            hash_set->erase(heap.back()->ts);
+            delete heap.back();
+            heap.pop_back();
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            hash_set->insert(ts + i * Const::tsLength);
+        }
+
+        if(heap.size() >= k)    bsf = heap[0]->dist;
+    }
+
+    for(PqItemSeries*s: heap){
+        if(s->needDeepCopy) {
+            hash_set->erase(s->ts);
+            s->copyData();
+            hash_set->insert(s->ts);
+        }
+    }
+    delete[]ts;
+    fclose(f);
+}
+
+void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,unordered_set<float*, createhash, isEqual>*hash_set,
+                       float *query_reordered, int *ordering) const{
+    assert(!isInternalNode());
+    if(query_reordered == nullptr || ordering == nullptr) {
+        search(k, queryTs, heap, index_dir, hash_set);
+        return;
+    }
+
+    double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
+    string fn = index_dir+ getFileName();
+
+    FILE *f = fopen(fn.c_str(), "rb");
+    auto *ts = new float[size * Const::tsLength];
+    fread(ts, sizeof(float), size * Const::tsLength, f);
+
+    _search_num += size; ::layer = FADASNode::layer;
+    for(int i=0;i<size;++i){
+        if(hash_set->find(ts + i * Const::tsLength) != hash_set->end()) continue;
+        double dist = TimeSeriesUtil::euclideanDist(query_reordered, ts + i * Const::tsLength, Const::tsLength, bsf, ordering);
 
         if(heap.size() < k){
             heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
@@ -1290,6 +1427,7 @@ void materializeInterNodePos(FADASNode *node, unsigned short *saxes) {
 FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
     Const::logPrint("Start building index.");
     auto start_t = chrono::system_clock::now();
+    loadCombines();
     FileUtil::checkDirClean(Const::fidxfn.c_str());
     auto end = chrono::system_clock::now();
 //    long series_num = generateSaxTbl();
@@ -1303,7 +1441,7 @@ FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
     root->size = series_num;
     for(int &i:root->bits_cardinality)  i=0;
     for(int i=0;i<Const::segmentNum;++i)    root->chosenSegments.push_back(i);
-    partUnit nodeIn1stLayer[Const::vertexNum];
+    vector<partUnit> nodeIn1stLayer(Const::vertexNum);
     int *navids = new int[series_num];
     for(int i=0;i<Const::vertexNum;++i)
         nodeIn1stLayer[i].id = i, nodeIn1stLayer[i].size=0, nodeIn1stLayer[i].pid = -1;
@@ -1364,13 +1502,13 @@ FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
     thread IO(materialize1stLayerWithSaxOnlyLeaf, datafn, root, navids, Const::fidxfn, saxes);
 
     int j = 0;
+    int milestone = 0.1 * Const::vertexNum;
     Const::logPrint("start grow the index structure");
     for(int i=0;i<Const::vertexNum;++i){
         if(nodeIn1stLayer[i].size > Const::th) {
-//            cout << i <<endl;
             root->children[i]->growIndex();
         }
-        if(++j%5000 == 0)
+        if(++j%milestone == 0)
             Const::logPrint(to_string(j) + " nodes in the 1st layer has been processed.");
     }
     start = chrono::system_clock::now();
@@ -2448,9 +2586,14 @@ void FADASNode::determineFanout(int *lambda_min, int * lambda_max) const{
         return;
     }
     *lambda_min = -1;
-    *lambda_max = -1;
+    *lambda_max = Const::segmentNum;
     double _min = size / (Const::th * Const::f_high);
     double _max = size / (Const::th * Const::f_low);
+    if(Const::vertexNum < _min){
+        *lambda_min = Const::segmentNum;
+        *lambda_max = Const::segmentNum;
+        return;
+    }
     for(int i = 1; i <= Const::segmentNum; ++i){
         if(*lambda_min == -1){
             if((1<< i) >= _min){
@@ -2467,8 +2610,6 @@ void FADASNode::determineFanout(int *lambda_min, int * lambda_max) const{
         }
     }
 }
-
-const int combines_num[] = {0, 16, 120, 560, 1820, 4368, 8008, 11440, 12870, 11440, 8008, 4368, 1820, 560, 12, 16};
 
 // determine fan-out and choose segments
 void FADASNode::determineSegmentsAvgVariance(){
@@ -2511,9 +2652,9 @@ void FADASNode::determineSegmentsAvgVariance(){
     double max_score = 0;
     vector<int> best_plan;
     for(int lambda = lambda_min; lambda <= lambda_max;++lambda){
-        int plan_num = combines_num[lambda];
+        int plan_num = FADASNode::combine_num[lambda];
         for(int i=0;i<plan_num;++i){
-            int *plan = IPGNode::combines[lambda][i];
+            int *plan = FADASNode::combines[lambda][i];
             double score = 0;
             for(int j = 0; j < lambda; ++j){
                 score += data_seg_stdev[plan[j]];
@@ -2554,7 +2695,11 @@ void FADASNode::determineSegmentsNaive() {
 void FADASNode::determineSegments(){
     int lambda_min, lambda_max;
     determineFanout(&lambda_min, &lambda_max);
-
+    if(lambda_min == Const::segmentNum && lambda_max == Const::segmentNum){
+        for(int i=0;i<Const::segmentNum;++i)
+            chosenSegments.push_back(i);
+        return;
+    }
     vector<int>unit_size(Const::vertexNum, 0);
 
     vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
@@ -2590,12 +2735,16 @@ void FADASNode::determineSegments(){
     vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
 
     // start to compute the size of each node in each plan
-    int plan_num = combines_num[lambda_max];
+    int plan_num;
+    if(lambda_max < Const::segmentNum)
+        plan_num = FADASNode::combine_num[lambda_max];
+    else
+        plan_num = 1;
     unordered_set<int>visited;
     double max_score = 0;
     vector<int> best_plan;
     for(int i=0;i<plan_num;++i){
-        int *plan = IPGNode::combines[lambda_max][i];
+        int *plan = FADASNode::combines[lambda_max][i];
         // first evaluate the whole plan
         vector<int>plan_node_sizes(1<<lambda_max, 0);
         int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
@@ -2669,12 +2818,12 @@ void FADASNode::determineSegments(unsigned short *node_saxes) {
     vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
 
     // start to compute the size of each node in each plan
-    int plan_num = combines_num[lambda_max];
+    int plan_num = FADASNode::combine_num[lambda_max];
     unordered_set<int>visited;
     double max_score = 0;
     vector<int> best_plan;
     for(int i=0;i<plan_num;++i){
-        int *plan = IPGNode::combines[lambda_max][i];
+        int *plan = FADASNode::combines[lambda_max][i];
         // first evaluate the whole plan
         vector<int>plan_node_sizes(1<<lambda_max, 0);
         int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
@@ -2821,12 +2970,12 @@ void FADASNode::determineSegmentsCluster(){
     vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
 
     // start to compute the size of each node in each plan
-    int plan_num = combines_num[lambda_max];
+    int plan_num = FADASNode::combine_num[lambda_max];
     unordered_set<int>visited;
     double max_score = 0;
     vector<int> best_plan;
     for(int i=0;i<plan_num;++i){
-        int *plan = IPGNode::combines[lambda_max][i];
+        int *plan = FADASNode::combines[lambda_max][i];
         // first evaluate the whole plan
         vector<int>plan_node_sizes(1<<lambda_max, 0);
         vector<vector<double>>plan_node_seg_mean(1<<lambda_max, vector<double>(Const::segmentNum,0));
@@ -3017,12 +3166,12 @@ void FADASNode::determineSegmentsWeakCluster(){
     vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
 
     // start to compute the size of each node in each plan
-    int plan_num = combines_num[lambda_max];
+    int plan_num = FADASNode::combine_num[lambda_max];
     unordered_set<int>visited;
     double max_score = 0;
     vector<int> best_plan;
     for(int i=0;i<plan_num;++i){
-        int *plan = IPGNode::combines[lambda_max][i];
+        int *plan = FADASNode::combines[lambda_max][i];
         // first evaluate the whole plan
         vector<int>plan_node_sizes(1<<lambda_max, 0);
         vector<vector<double>>plan_node_seg_mean(1<<lambda_max, vector<double>(lambda_max,0));
@@ -3626,7 +3775,7 @@ struct pack{
     }
 };
 
-int FADASNode::partitionNew(partUnit* nodes_map, int chosen_segment_number){
+int FADASNode::partitionNew(vector<partUnit>& nodes_map, int chosen_segment_number){
     vector<partUnit*>nodes;
     int input_node_number = 1 << chosen_segment_number;
     int total_size = 0, node_number;
@@ -3717,6 +3866,98 @@ int FADASNode::partitionNew(partUnit* nodes_map, int chosen_segment_number){
     return max_pid + 1;
 }
 
+int FADASNode::partitionNew(partUnit* nodes_map, int chosen_segment_number){
+    vector<partUnit*>nodes;
+    int input_node_number = 1 << chosen_segment_number;
+    int total_size = 0, node_number;
+    for(int i=0;i<input_node_number;++i){
+        if(nodes_map[i].size < Const::th * Const::small_perc && nodes_map[i].size > 0) {
+            nodes.push_back(&nodes_map[i]);
+            total_size += nodes_map[i].size;
+        }
+    }
+
+    node_number = nodes.size();
+    if(node_number <= 3) return 0;
+//    cout << "node number = " << node_number <<", total size = " << total_size << endl;
+//    sort(nodes.begin(),  nodes.end(), partUnit::comp_size);
+    int pid = 0;
+    int first_round_pack_num = (int)floor(total_size / (Const::th));
+    if(node_number <= first_round_pack_num) return 0;
+    int max_mask_num = floor(chosen_segment_number * Const::max_mask_bit_percentage);
+    // 0.5 is a small number, generate more packs in the first round
+    vector<pack>packs(first_round_pack_num);
+    sort(nodes.begin(), nodes.end(), partUnit::comp_size);
+    for(int i=0;i<first_round_pack_num;++i){
+        packs[i] = pack(nodes[i], chosen_segment_number, i);
+    }
+
+    for(partUnit* cur_node:nodes) {
+        if (cur_node->pid != -1) continue;   // the node has been packed
+        int cur_id = cur_node->id;
+
+        int min_cost = chosen_segment_number;
+        int pack_id = -1;
+        for (pack &p: packs) {
+            if (p.total_size + cur_node->size > Const::th || p.masked_bits_num >= max_mask_num) continue;
+            int cost = p.calc_cost(cur_id, chosen_segment_number);
+            if(cost + p.masked_bits_num >= max_mask_num)    continue;
+            if (cost < min_cost) {
+                min_cost = cost;
+                pack_id = p.pid;
+            }
+        }
+        if (pack_id == -1) {
+            packs.emplace_back(cur_node, chosen_segment_number, packs.size());
+        }else {
+            packs[pack_id].insert(cur_node, chosen_segment_number);
+        }
+    }
+
+    // merge packs
+    unordered_map<int,int>pid_map;
+    for(int i = 0;i<packs.size();++i)
+        pid_map[i] = i;
+    sort(packs.begin(),packs.end(), pack::comp_size);
+    for(int i=0;i<packs.size();++i){
+        pack& cur_pack = packs[i];
+        if(cur_pack.pid != pid_map[cur_pack.pid])    continue;
+
+        int min_cost = chosen_segment_number;
+        int min_size = numeric_limits<int>::max();
+        int min_pack_id = -1;
+        int cur_cost, tar_cost;
+        for(int j=0;j<packs.size();++j){
+            pack&target_pack = packs[j];
+            if(target_pack.disabled || cur_pack.pid == target_pack.pid || cur_pack.total_size + target_pack.total_size > Const::th
+               || cur_pack.masked_bits_num >= max_mask_num || target_pack.masked_bits_num >= max_mask_num) continue;
+            cur_pack.calc_pack_merge_cost(target_pack, chosen_segment_number, &cur_cost, &tar_cost);
+            if(cur_cost + cur_pack.masked_bits_num >= max_mask_num ||
+               tar_cost + target_pack.masked_bits_num >= max_mask_num) continue;
+            int cost = cur_cost + tar_cost;
+            if(cost < min_cost || (cost == min_cost && cur_pack.total_size < min_size)){
+                min_cost = cost;
+                min_size = target_pack.total_size;
+                min_pack_id = j;
+            }
+        }
+
+        if(min_size < numeric_limits<int>::max()){
+            cur_pack.merge_pack(&packs[min_pack_id], chosen_segment_number);
+        }
+    }
+
+    // re-assign the pids to the nodes
+    int max_pid = 0;
+    for(partUnit* node:nodes) {
+        node->pid = pid_map[node->pid];
+        max_pid = max(max_pid, node->pid);
+    }
+
+    return max_pid + 1;
+}
+
+
 int findFirstLE(vector<partUnit*>&nodes, int start, int end, int target){
     int mid, nn = end + 1;
     while (start < end){
@@ -3776,6 +4017,13 @@ void FADASNode::getIndexStats(){
     cout << "Avg. Height = " << getSumHeight() / (double) total_leaf_node_num << endl;
     cout <<"Avg. Filling Factor = "<< total_size / (double)total_leaf_node_num / Const::th << endl;
     cout << "Bias leaf node ratio = " << (double)getBiasLeafNodeNum() / total_leaf_node_num << endl;
+    double sum = 0, sum_square  = 0, sum_dist = 0;
+    int deep_leaf_num = 0;
+    getBoundRange(&sum, &sum_square, &deep_leaf_num, &sum_dist);
+    cout << "deep layer leaf number = " << deep_leaf_num <<endl;
+    cout << "total sum = " << sum <<", avg sum = " << sum / deep_leaf_num << endl;
+    cout << "total sum_square = " << sum_square << ", avg sum square = " << sum_square / deep_leaf_num << endl;
+    cout << "total sum_distance = " << sum_dist << ", avg sum dist = " << sum_dist / deep_leaf_num << endl;
 }
 
 int FADASNode::get1stLayerInterNodesNo(){
@@ -3832,6 +4080,39 @@ int FADASNode::getLeafNodeNum(){
         hash_map.insert(child);
     }
     return sum;
+}
+
+void FADASNode::getBoundRange(double *sum, double *sum_square, int *leafNum, double *sum_dist) {
+    int len = 1 << chosenSegments.size();
+    unordered_set<FADASNode*>visited;
+
+    for(int i=0;i<len;++i){
+        if(children[i] == nullptr)    continue;
+        if(visited.count(children[i]) > 0)  continue;
+        if(children[i]->isInternalNode()){
+            children[i]->getBoundRange(sum, sum_square, leafNum, sum_dist);
+        }else{
+            auto child = children[i];
+            visited.insert(child);
+            *leafNum += 1;
+
+            double dist = 0;
+            int bc[Const::segmentNum];
+            unsigned short s[Const::segmentNum];
+            SaxUtil::extendSax(sax, bits_cardinality, chosenSegments, i, s,bc);
+            for(int j=0; j < Const::segmentNum; ++j){
+                double lb, ub;
+                SaxUtil::getValueRange(s[j], bc[j], &lb, &ub);
+                if(lb == -numeric_limits<double>::max())    lb = -4;
+                if(ub == numeric_limits<double>::max()) ub = 4;
+                *sum += (ub - lb);
+                *sum_square += ((ub-lb) * (ub -lb));
+                dist += Const::tsLengthPerSegment * ((ub-lb) * (ub -lb));
+            }
+            *sum_dist += sqrt(dist);
+            cout << sqrt(dist) << ",";
+        }
+    }
 }
 
 // isax bias leaf nodes number

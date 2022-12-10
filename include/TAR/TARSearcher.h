@@ -35,6 +35,8 @@ public:
 
     static void approxIncSearchSub(TARGNode *root, float *query, int k, const string &index_dir, int *node_num,
                             vector<PqItemSeries *> *heap, string &query_invsax_str);
+
+    static vector<PqItemSeries *> *ngSearch(TARGNode *root, float *query, int k, const string &index_dir, int nprobe);
 };
 
 

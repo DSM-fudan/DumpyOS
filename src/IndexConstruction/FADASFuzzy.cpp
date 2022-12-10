@@ -222,6 +222,7 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
     auto start_t = chrono::system_clock::now();
     FileUtil::checkDirClean(Const::fuzzyidxfn.c_str());
     Const::logPrint("start building index.");
+    loadCombines();
 
     long series_num = loadSax(saxfn);
     loadPaa(paafn);
@@ -234,7 +235,7 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
     auto* root = new FADASNode();
     root->size = series_num;
     for(int &i:root->bits_cardinality)  i=0;
-    partUnit nodeIn1stLayer[Const::vertexNum];
+    vector<partUnit> nodeIn1stLayer(Const::vertexNum);
 
     int *navids = new int[series_num];
     for(int i=0;i<Const::vertexNum;++i)
@@ -586,7 +587,7 @@ void FADASNode::fuzzySeriesInPartUnit(partUnit *part_units, int actual_size, int
     }
 }
 
-void FADASNode::fuzzySeriesInPartUnitInFirstLayer(partUnit *part_units, vector<int> &node_offsets, int _id,
+void FADASNode::fuzzySeriesInPartUnitInFirstLayer(vector<partUnit> &part_units, vector<int> &node_offsets, int _id,
                                                   unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl,
                                                   vector<vector<double >> &paa_mu_part_units) const{
     float *paa, range;
@@ -634,7 +635,7 @@ void FADASNode::fuzzySeriesInPartUnitInFirstLayer(partUnit *part_units, vector<i
 }
 
 
-void FADASNode::fuzzyFirstLayer(partUnit *part_units, const int *nav_ids,
+void FADASNode::fuzzyFirstLayer(vector<partUnit> &part_units, const int *nav_ids,
                                 unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl,
                                 vector<vector<double>> &paa_mu_part_units) const {
     // data offsets are stored in internal node rather than leaf part units

@@ -84,6 +84,10 @@ public:
     static void exactSearchTARDISORIGINDTW(TARGNode *root);
 
     static void completeWorkload();
+
+    static void ngSearchDumpyFuzzy(FADASNode *root);
+
+    static void ngSearchTARDISORIGIN(TARGNode *root);
 };
 
 

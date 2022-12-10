@@ -60,7 +60,7 @@ vector<vector<int>>* loadGraphSkeleton(){
 
     if(!FileUtil::checkFileExists(Const::graphfn.c_str())){
         cout << "File not exists!" << Const::graphfn << endl;
-        exit(-1);
+        return nullptr;
     }
     FILE *f = fopen(Const::graphfn.c_str(), "rb");
 
@@ -338,7 +338,7 @@ void buildTardisTree(){
     TardisTreeNode::mergingTardis(root);
     cout << "build finish" << endl;
     root->getIndexStats();
-    root->save2Disk(getOtherIndexfn("tardis"));
+    root->save2Disk(Const::tardisfn + "root.idx");
 }
 
 void buildTardisTreeMat(){
@@ -350,8 +350,9 @@ void buildTardisTreeMat(){
     cout << "skeleton build finish" << endl;
     cout <<"CPU building time = " << cpu_build_time / 1000.0 << "ms" <<endl;
     root->materialize(Const::tardisfn);
+    root->save2Disk(Const::tardisfn + "root.idx");
+    cout << "save index done\n";
     root->getIndexStats();
-    root->save2Disk(getOtherIndexfn("tardis"));
 }
 
 //void mergeTardisTreeNodes(){
@@ -362,7 +363,7 @@ void buildTardisTreeMat(){
 //}
 
 void recallExprResTardis(){
-    TardisTreeNode* root = TardisTreeNode::loadFromDisk(Const::saxfn, getOtherIndexfn("tardis"), true);
+    TardisTreeNode* root = TardisTreeNode::loadFromDisk(Const::saxfn, Const::tardisfn + "root.idx", true);
     cout << "load finish." << endl;
     Recall::doExprWithResTardis(root, Const::resfn, Const::queryfn);
 }
@@ -375,7 +376,7 @@ void recallExprResIncTardis(){
 
 
 void statTardis(){
-    TardisTreeNode* root = TardisTreeNode::loadFromDisk(Const::saxfn, getOtherIndexfn("tardis"), true);
+    TardisTreeNode* root = TardisTreeNode::loadFromDisk(Const::saxfn, Const::tardisfn + "root.idx", true);
     cout << "load finish." << endl;
     root->getIndexStats();
 }
@@ -659,6 +660,13 @@ void ngSearch(){
     Recall::ngSearchDumpy(root, g);
 }
 
+void ngSearchFuzzy(){
+    int bound = Const::boundary * 100;
+    Const::fuzzyidxfn += "/" + to_string(bound) + "-" + to_string(Const::max_replica) + "/";
+    FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fuzzyidxfn + "root.idx", false);
+    Recall::ngSearchDumpyFuzzy(root);
+}
+
 void approxSearchTARDISORIGIN(){
     TARGNode* root = TARGNode::loadFromDisk(Const::tardisfn + "root.idx");
     Recall::approxTARDISORIGIN(root);
@@ -677,6 +685,11 @@ void approxIncSearchTARDISORIGIN(){
 void exactSearchTARDISORIGIN(){
     TARGNode* root = TARGNode::loadFromDisk(Const::tardisfn + "root.idx");
     Recall::exactSearchTARDISORIGIN(root);
+}
+
+void ngSearchTARDISORIGIN(){
+    TARGNode* root = TARGNode::loadFromDisk(Const::tardisfn + "root.idx");
+    Recall::ngSearchTARDISORIGIN(root);
 }
 
 void statTARDISORIGIN(){
@@ -830,9 +843,13 @@ int main() {
                 case 9:
                     if(Const::materialized == 1)
                         Recall::completeWorkload();
+                    break;
                 case 10:
                     if(Const::materialized == 1)
                         ngSearch();
+                    else
+                        Const::logPrint("not supported now!");
+                    break;
                 default:
                     break;
             }
@@ -851,6 +868,8 @@ int main() {
                 if(Const::materialized == 1)    recallExprResIncFADASFuzzy();
             }else if(Const::ops == 6){
                 if(Const::materialized == 1)    recallExprResFADASFuzzyDTW();
+            }else if(Const::ops == 10){
+                if(Const::materialized == 1)    ngSearchFuzzy();
             }
             exit(0);
         case 3:
@@ -930,6 +949,9 @@ int main() {
             } else if(Const::ops == 7){
                 if(Const::materialized == 1)
                     exactSearchDTWTARDISORIGIN();
+            } else if(Const::ops == 10){
+                if(Const::materialized == 1)
+                    ngSearchTARDISORIGIN();
             }
 
             exit(0);
@@ -940,7 +962,8 @@ int main() {
         default:    break;
     }
 
-    {//generateQueryFile();
+    {
+        //generateQueryFile();
 //generateGroundTruth();
 //generateGroundTruthDTW();
 //generateSax();
