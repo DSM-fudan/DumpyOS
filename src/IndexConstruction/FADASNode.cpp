@@ -152,58 +152,106 @@ void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap,
     fclose(f);
 }
 
-//void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
-//                       float *query_reordered, int *ordering) const{
-//    assert(!isInternalNode());
-//    if(query_reordered == nullptr || ordering == nullptr) {
-//        search(k, queryTs, heap, index_dir);
-//        return;
-//    }
-//    double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
-//    _search_num += size;
-//    string fn = index_dir+ getFileName();
-//    if(partition_id == -1)  fn += "_L";
-////    long fs = FileUtil::getFileSize(fn.c_str());
-////    int series_num = fs / Const::tsLengthBytes;
-////    assert(series_num == size);
-//
-//    FILE *f = fopen(fn.c_str(), "rb");
-//    struct timeval io{};
-//    Const::timer_start(&io);
-//    auto *ts = new float[size * Const::tsLength];
-////    for(int i=0;i<size;++i)
-////        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
-//    fread(ts, sizeof(float), size * Const::tsLength, f);
-//    READ_TIME += Const::timer_end(&io);
-//
-//    _search_num += size; ::layer = FADASNode::layer;
-//    for(int i=0;i<size;++i){
-////        struct timeval start{};
-////        Const::timer_start(&start);
-////        double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
-//        double dist = TimeSeriesUtil::euclideanDist_SIMD(query_reordered, ts + i * Const::tsLength, Const::tsLength, bsf, ordering);
-////        DIST_CALC_TIME += Const::timer_end(&start);
-//
-//        if(heap.size() < k){
-//            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
-//            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
-//        }else if(dist < bsf){
-//            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
-//            delete heap.back();
-//            heap.pop_back();
-//            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
-//            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
-//        }
-//
-//        if(heap.size() >= k)    bsf = heap[0]->dist;
-//    }
-//
-//    for(PqItemSeries*s: heap){
-//        if(s->needDeepCopy) s->copyData();
-//    }
-//    delete[]ts;
-//    fclose(f);
-//}
+void FADASNode::search_SIMD_reordered(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
+                                      float *query_reordered, int *ordering) const{
+    assert(!isInternalNode());
+    if(query_reordered == nullptr || ordering == nullptr) {
+        search(k, queryTs, heap, index_dir);
+        return;
+    }
+    double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
+    _search_num += size;
+    string fn = index_dir+ getFileName();
+    if(partition_id == -1)  fn += "_L";
+//    long fs = FileUtil::getFileSize(fn.c_str());
+//    int series_num = fs / Const::tsLengthBytes;
+//    assert(series_num == size);
+
+    FILE *f = fopen(fn.c_str(), "rb");
+    struct timeval io{};
+    Const::timer_start(&io);
+    auto *ts = new float[size * Const::tsLength];
+//    for(int i=0;i<size;++i)
+//        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
+    fread(ts, sizeof(float), size * Const::tsLength, f);
+    READ_TIME += Const::timer_end(&io);
+
+    _search_num += size; ::layer = FADASNode::layer;
+    for(int i=0;i<size;++i){
+//        struct timeval start{};
+//        Const::timer_start(&start);
+//        double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+        double dist = TimeSeriesUtil::euclideanDist_SIMD(query_reordered, ts + i * Const::tsLength, Const::tsLength, bsf, ordering);
+//        DIST_CALC_TIME += Const::timer_end(&start);
+
+        if(heap.size() < k){
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }else if(dist < bsf){
+            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            delete heap.back();
+            heap.pop_back();
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }
+
+        if(heap.size() >= k)    bsf = heap[0]->dist;
+    }
+
+    for(PqItemSeries*s: heap){
+        if(s->needDeepCopy) s->copyData();
+    }
+    delete[]ts;
+    fclose(f);
+}
+
+void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
+    assert(!isInternalNode());
+    double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
+    _search_num += size;
+    string fn = index_dir+ getFileName();
+    if(partition_id == -1)  fn += "_L";
+//    long fs = FileUtil::getFileSize(fn.c_str());
+//    int series_num = fs / Const::tsLengthBytes;
+//    assert(series_num == size);
+
+    FILE *f = fopen(fn.c_str(), "rb");
+    struct timeval io{};
+    Const::timer_start(&io);
+    auto *ts = new float[size * Const::tsLength];
+//    for(int i=0;i<size;++i)
+//        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
+    fread(ts, sizeof(float), size * Const::tsLength, f);
+    READ_TIME += Const::timer_end(&io);
+
+    _search_num += size; ::layer = FADASNode::layer;
+    for(int i=0;i<size;++i){
+//        struct timeval start{};
+//        Const::timer_start(&start);
+//        double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+        double dist = TimeSeriesUtil::euclideanDist_SIMD(query_reordered, ts + i * Const::tsLength, Const::tsLength, bsf, ordering);
+//        DIST_CALC_TIME += Const::timer_end(&start);
+
+        if(heap.size() < k){
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }else if(dist < bsf){
+            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            delete heap.back();
+            heap.pop_back();
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }
+
+        if(heap.size() >= k)    bsf = heap[0]->dist;
+    }
+
+    for(PqItemSeries*s: heap){
+        if(s->needDeepCopy) s->copyData();
+    }
+    delete[]ts;
+    fclose(f);
+}
 
 void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
     assert(!isInternalNode());

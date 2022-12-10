@@ -185,8 +185,8 @@ public:
     [[nodiscard]] bool isInternalNode() const {return  size > Const::th;}
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                 float *query_reordered, int *ordering) const;
-    void search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
-                                float *query_reordered, int *ordering) const;
+    void search_SIMD_reordered(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
+                               float *query_reordered, int *ordering) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                 std::unordered_set<float *, createhash, isEqual> *hash_set) const;
