@@ -457,7 +457,8 @@ vector<PqItemSeries*>*FADASSearcher::exactSearchIdLevel(FADASNode* root, float *
             }
         }else{
             ++LOADED_NODE_CNT;
-            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+//            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            node->search_SIMD(k,queryTs,*heap,Const::fidxfn);
             bsf = (*heap)[0]->dist;
         }
     }

@@ -70,6 +70,10 @@ public:
 
     static double LowerBound_Paa_iSax_SIMD(const float *paa, const unsigned short *sax, const int* bits_cardinality, vector<int>&chosen_segs, int new_i);
 
+    static double LowerBound_Paa_iSax_SIMD(const float *paa, const unsigned short *sax, const int* bits_cardinality) ;
+
+        static double  minidist_paa_to_isax_rawa_SIMD(const float *paa, unsigned char*sax, unsigned char*sax_cardinalities);
+
     static double getMinDist1stLayer(const float *paa, int id);
 
     static int invSaxHead2FromSax(vector<int> *sax, int bitsCardinality, int segmentNum);

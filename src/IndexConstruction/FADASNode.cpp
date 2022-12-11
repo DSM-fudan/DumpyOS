@@ -7,6 +7,7 @@
 #include <cmath>
 #include <bitset>
 #include <unordered_map>
+#include "liburing.h"
 #include "../../include/DataStructures/FADASNode.h"
 #include "../../include/Utils/FileUtil.h"
 #include "../../include/Utils/MathUtil.h"
@@ -205,23 +206,33 @@ void FADASNode::search_SIMD_reordered(int k, TimeSeries *queryTs, vector<PqItemS
     fclose(f);
 }
 
+#define URING
 void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
     assert(!isInternalNode());
     double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
     _search_num += size;
     string fn = index_dir+ getFileName();
     if(partition_id == -1)  fn += "_L";
-//    long fs = FileUtil::getFileSize(fn.c_str());
-//    int series_num = fs / Const::tsLengthBytes;
-//    assert(series_num == size);
 
-    FILE *f = fopen(fn.c_str(), "rb");
     struct timeval io{};
     Const::timer_start(&io);
     auto *ts = new float[size * Const::tsLength];
-//    for(int i=0;i<size;++i)
-//        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
+#ifndef URING
+    FILE *f = fopen(fn.c_str(), "rb");
     fread(ts, sizeof(float), size * Const::tsLength, f);
+#else
+    io_uring ring{};
+    auto ret = io_uring_queue_init(16, &ring, 0);
+    auto fd = open(fn.c_str(), O_RDONLY);
+    iovec vec{};
+    vec.iov_base = ts;
+    vec.iov_len = size * Const::tsLength * sizeof(float );
+    io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+    io_uring_prep_read(sqe, fd, ts, size * Const::tsLength * sizeof(float ), 0);
+    ret = io_uring_submit(&ring);
+    io_uring_cqe* cqe;
+    ret = io_uring_wait_cqe(&ring, &cqe);
+#endif
     READ_TIME += Const::timer_end(&io);
 
     _search_num += size; ::layer = FADASNode::layer;
@@ -229,7 +240,7 @@ void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &
 //        struct timeval start{};
 //        Const::timer_start(&start);
 //        double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
-        double dist = TimeSeriesUtil::euclideanDist_SIMD(query_reordered, ts + i * Const::tsLength, Const::tsLength, bsf, ordering);
+        double dist = TimeSeriesUtil::euclideanDist_SIMD(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
 //        DIST_CALC_TIME += Const::timer_end(&start);
 
         if(heap.size() < k){
@@ -250,7 +261,12 @@ void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &
         if(s->needDeepCopy) s->copyData();
     }
     delete[]ts;
+#ifndef URING
     fclose(f);
+#else
+    close(fd);
+    io_uring_queue_exit(&ring);
+#endif
 }
 
 void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
