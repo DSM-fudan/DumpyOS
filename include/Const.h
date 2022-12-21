@@ -6,6 +6,7 @@
 #define MULGIFT_CONST_H
 #include <string>
 #include <iostream>
+#include <cassert>
 #include <sys/time.h>
 #include "../include/Utils/INIReader.h"
 
@@ -25,7 +26,7 @@ public:
     // sec:expr
     static string dataset, method;
     static int tsLength, maxK, index, ops, materialized, method_code, query_num, series_num, k, dtw_window_size,
-    batch_size, batch_num, pre_read;
+    batch_size, batch_num, pre_read, thread_num, messi_pq_num, SSD_pq_num;
     static double dtw_window_percent;
 
     //sec: parameter
@@ -78,11 +79,20 @@ public:
         query_num = reader.GetInteger("expr", "query_num", -1);
         cout << "query_num: " << query_num << endl;
 
+        messi_pq_num = reader.GetInteger("expr", "messi_pq_num", -1);
+        cout << "messi_pq_num: " << messi_pq_num << endl;
+
+        SSD_pq_num = reader.GetInteger("expr", "SSD_pq_num", -1);
+        cout << "SSD_pq_num: " << SSD_pq_num << endl;
+
         series_num = reader.GetInteger("expr", "series_num", -1);
         cout << "series_num: " << series_num << endl;
 
         k = reader.GetInteger("expr", "k", -1);
         cout << "k: " << k << endl;
+
+        thread_num = reader.GetInteger("expr", "thread_num", -1);
+        cout << "thread_num: " << thread_num << endl;
 
         batch_size = reader.GetInteger("expr", "batch_size", -1);
         cout << "batch_size: " << batch_size << endl;
@@ -214,8 +224,8 @@ public:
         for(int i=1;i<=bitsReserve;++i){
             neighborNum += nChooseK(Const::segmentNum, i);
         }
-        cout << "Neighbor number : " << neighborNum << endl;
 
+        assert(thread_num >= messi_pq_num);
     }
 
     static int nChooseK(int n, int r) {

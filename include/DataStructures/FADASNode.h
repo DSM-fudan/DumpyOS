@@ -171,6 +171,13 @@ public:
         if(layer == 1)  return "1_" + to_string(partition_id);
         return to_string(layer) + "-" + file_id;
     }
+    inline string getFileNameWrapper() const {
+        string tmp;
+        if(layer == 1) tmp = "1_" + to_string(partition_id);
+        else tmp = to_string(layer) + "-" + file_id;
+        if(partition_id == -1)  tmp += "_L";
+        return tmp;
+    }
     [[nodiscard]] string getFileNamePack() const{
         if(layer == 1) {
             if(isLeafPack())    return "1_P_" + to_string(partition_id);
@@ -188,7 +195,9 @@ public:
     void search_SIMD_reordered(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                                float *query_reordered, int *ordering) const;
     void search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
-        void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
+    vector<PqItemSeries *>* search_SIMD(int k, TimeSeries* queryTs, const string &index_dir, double bsf) const;
+    void search_SIMD_series_prune(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
+    void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                 std::unordered_set<float *, createhash, isEqual> *hash_set) const;
     void search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,unordered_set<float*, createhash, isEqual>*hash_set,

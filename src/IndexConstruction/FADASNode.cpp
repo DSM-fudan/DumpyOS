@@ -206,7 +206,7 @@ void FADASNode::search_SIMD_reordered(int k, TimeSeries *queryTs, vector<PqItemS
     fclose(f);
 }
 
-#define URING
+//#define URING
 void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
     assert(!isInternalNode());
     double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
@@ -227,6 +227,103 @@ void FADASNode::search_SIMD(int k, TimeSeries *queryTs, vector<PqItemSeries *> &
     iovec vec{};
     vec.iov_base = ts;
     vec.iov_len = size * Const::tsLength * sizeof(float );
+    io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+    io_uring_prep_read(sqe, fd, ts, size * Const::tsLength * sizeof(float ), 0);
+    ret = io_uring_submit(&ring);
+    io_uring_cqe* cqe;
+    ret = io_uring_wait_cqe(&ring, &cqe);
+#endif
+    READ_TIME += Const::timer_end(&io);
+
+    _search_num += size; ::layer = FADASNode::layer;
+    for(int i=0;i<size;++i){
+//        double dist = TimeSeriesUtil::euclideanDist(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+        double dist = TimeSeriesUtil::euclideanDist_SIMD(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+
+        if(heap.size() < k){
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }else if(dist < bsf){
+            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            delete heap.back();
+            heap.pop_back();
+            heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }
+
+        if(heap.size() >= k)    bsf = heap[0]->dist;
+    }
+
+    for(PqItemSeries*s: heap){
+        if(s->needDeepCopy) s->copyData();
+    }
+    delete[]ts;
+#ifndef URING
+    fclose(f);
+#else
+    close(fd);
+    io_uring_queue_exit(&ring);
+#endif
+}
+
+vector<PqItemSeries *>* FADASNode::search_SIMD(int k, TimeSeries* queryTs, const string &index_dir, double bsf) const{
+    string fn = index_dir+ getFileName();
+    if(partition_id == -1)  fn += "_L";
+    auto ret = new vector<PqItemSeries *>();
+
+    struct timeval io{};
+    Const::timer_start(&io);
+    auto *ts = new float[size * Const::tsLength];
+    FILE *f = fopen(fn.c_str(), "rb");
+    fread(ts, sizeof(float), size * Const::tsLength, f);
+    READ_TIME += Const::timer_end(&io);
+    fclose(f);
+
+    for(int i=0;i<size;++i){
+        double dist = TimeSeriesUtil::euclideanDist_SIMD(queryTs->ts, ts + i * Const::tsLength, Const::tsLength, bsf);
+        if(dist < bsf){
+            if(ret->size() < k){
+                ret->push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+                push_heap(ret->begin(),  ret->end(), PqItemSeriesMaxHeap());
+            }else if(dist < (*ret)[0]->dist){
+                pop_heap(ret->begin(),  ret->end(), PqItemSeriesMaxHeap());
+                delete ret->back();
+                ret->pop_back();
+                ret->push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
+                push_heap(ret->begin(),  ret->end(), PqItemSeriesMaxHeap());
+            }
+        }
+    }
+
+    for(PqItemSeries*s: *ret){
+        if(s->needDeepCopy) s->copyData();
+    }
+    delete[]ts;
+    sort(ret->begin(), ret->end(), PqItemSeriesMaxHeap());
+    return ret;
+}
+
+void FADASNode::search_SIMD_series_prune(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir) const{
+    assert(!isInternalNode());
+    double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
+    _search_num += size;
+    string fn = index_dir+ getFileName();
+    string saxfn = fn;
+    if(partition_id == -1) { fn += "_L";  saxfn += "_L";}
+
+    struct timeval io{};
+    Const::timer_start(&io);
+    auto *ts = new float[size * Const::tsLength];
+#ifndef URING
+    FILE *f = fopen(fn.c_str(), "rb");
+    fread(ts, sizeof(float), size * Const::tsLength, f);
+#else
+    io_uring ring{};
+    auto ret = io_uring_queue_init(16, &ring, 0);
+    auto fd = open(fn.c_str(), O_RDONLY);
+//    iovec vec{};
+//    vec.iov_base = ts;
+//    vec.iov_len = size * Const::tsLength * sizeof(float );
     io_uring_sqe* sqe = io_uring_get_sqe(&ring);
     io_uring_prep_read(sqe, fd, ts, size * Const::tsLength * sizeof(float ), 0);
     ret = io_uring_submit(&ring);

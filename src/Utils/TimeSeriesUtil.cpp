@@ -96,10 +96,13 @@ int TimeSeriesUtil::intersectionTsSetsCardinality(const vector<PqItemSeries *> &
 
 int TimeSeriesUtil::intersectionTsSetsCardinality(const vector<PqItemSeries *> *tsSet1, vector<float *> *tsSet2){
     int intersectionNum = 0, size= tsSet1->size();
+    unordered_set<int>has_used;
     for(const PqItemSeries* currentTs : *tsSet1)
         for(int i=0;i<size;++i){
+            if(has_used.count(i) > 0)   continue;
             if(isSame(currentTs, (*tsSet2)[i])) {
                 intersectionNum++;
+                has_used.insert(i);
                 break;
             }
         }

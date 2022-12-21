@@ -29,6 +29,18 @@ public:
     exactSearchIdLevel(FADASNode *root, float *query, int k, vector<vector<int>> *g, float *query_reordered,
                        int *ordering);
 
+    static vector<PqItemSeries*>*Par_exactSearchIdLevel(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                                       float *query_reordered, int *ordering);
+
+    static vector<PqItemSeries*>* Par_exactSearchIdLevel_MyPq(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                                     float *query_reordered, int *ordering);
+
+    static vector<PqItemSeries*>*Par_exactSearchIdLevel_MESSI(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                                             float *query_reordered, int *ordering);
+
+    static vector<PqItemSeries*>*Par_exactSearchIdLevel_SSD(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                                    float *query_reordered, int *ordering);
+
     static vector<PqItemSeries*>* exactSearchDTW(FADASNode* root, float *query, int k, vector<vector<int>> *g);
 
     static vector<PqItemSeries *> *exactSearchPos(FADASNode *root, float *query, int k, vector<vector<int>> *g);

@@ -5,18 +5,22 @@
 #include <set>
 #include <unordered_set>
 #include <chrono>
+#include <mutex>
+#include <atomic>
 #include <cmath>
+#include <queue>
+#include <io.h>
+#include "liburing.h"
 #include "../../include/Searchers/FADASSearcher.h"
-#include "../../include/DataStructures/PqItemSeries.h"
-#include "../../include/DataStructures/TimeSeries.h"
-#include "../../include/Utils/SaxUtil.h"
 #include "../../include/Utils/MathUtil.h"
-#include "../../include/Const.h"
+#include "../../include/Utils/TimeSeriesUtil.h"
+#include "../../include/DataStructures/SafePq.h"
+#include "../../include/DataStructures/SafeHashMap.h"
 
 extern long LB_SERIES_TIME = 0, HEAP_TIME = 0,
     LB_NODE_TIME_STAT = 0, LB_NODE_CNT = 0, LOADED_NODE_CNT = 0;
-extern double DIST_CALC_TIME = 0, READ_TIME = 0;
-extern int layer;
+extern double DIST_CALC_TIME = 0, READ_TIME = 0, PREPARE_TIME = 0, SEARCH_TIME = 0;
+extern int layer, _search_num;
 static FADASNode* targetNode;
 vector<PqItemSeries *> * FADASSearcher::approxSearch(FADASNode *root, float *query, int k, vector<vector<int>> *g,
                                                      const string &index_dir,
@@ -369,8 +373,26 @@ struct PqItemFadasId{
         if(dist != pt.dist)
             return dist < pt.dist;
         if(parent->layer != pt.parent->layer)
+            return parent->layer > pt.parent->layer;
+        return parent < pt.parent;
+    }
+
+    bool operator >(const PqItemFadasId& pt) const{
+        if(dist != pt.dist)
+            return dist > pt.dist;
+        if(parent->layer != pt.parent->layer)
             return parent->layer < pt.parent->layer;
-        return false;
+        return parent > pt.parent;
+    }
+};
+
+struct cmp_PqItemDumpyId{
+    bool operator()(const PqItemFadasId& a, const PqItemFadasId& pt) const{
+        if(a.dist != pt.dist)
+            return a.dist > pt.dist;
+        if(a.parent->layer != pt.parent->layer)
+            return a.parent->layer < pt.parent->layer;
+        return a.parent > pt.parent;
     }
 };
 
@@ -459,6 +481,10 @@ vector<PqItemSeries*>*FADASSearcher::exactSearchIdLevel(FADASNode* root, float *
             ++LOADED_NODE_CNT;
 //            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
             node->search_SIMD(k,queryTs,*heap,Const::fidxfn);
+            for(auto item:*heap){
+                if(fabs(item->dist - 11.36) < 1e-2)
+                    cout << "here";
+            }
             bsf = (*heap)[0]->dist;
         }
     }
@@ -468,6 +494,565 @@ vector<PqItemSeries*>*FADASSearcher::exactSearchIdLevel(FADASNode* root, float *
     return heap;
 }
 
+atomic<int> load_node_cnt;
+atomic<int> search_num;
+mutex m, pq_mutex;
+void process_pq(double bsf, TimeSeries* queryTs, int k, vector<PqItemSeries*>* heap, SafeHashMap<FADASNode*, char>*visited,
+                PriorityBlockingCollection<PqItemFadasId>* pq){
+    PqItemFadasId cur;
+    double top_dist;
+    FADASNode* node;
+    int internal_node = 0, leaf_node = 0;
+    char _ = 0;
+    int len;
+    while(!pq->is_empty()){
+        pq->take_prio(cur);
+        top_dist = cur.dist;
+        if(top_dist >= bsf) break;
+        node = cur.parent->children[cur.id];
+        if(visited->find(node, _)) continue;
+        visited->insert(node, _);
+        if(node->isInternalNode()){
+            ++internal_node;
+            len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax,
+                                                           node->bits_cardinality, node->chosenSegments, i);
+                if(dist < bsf)
+                    pq->emplace(node, i, dist);
+            }
+        }else{
+            load_node_cnt++;
+            search_num += node->size;
+            ++leaf_node;
+//            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            auto ret = node->search_SIMD(k,queryTs, Const::fidxfn, bsf);
+            int i=0;
+            {
+                lock_guard<mutex> g(m);
+                bsf = (*heap)[0]->dist;
+                for(;i<ret->size() && (*ret)[i]->dist < bsf ;++i){
+                    pop_heap(heap->begin(),  heap->end(), PqItemSeriesMaxHeap());
+                    delete heap->back();
+                    heap->pop_back();
+                    heap->push_back((*ret)[i]);
+                    push_heap(heap->begin(),  heap->end(), PqItemSeriesMaxHeap());
+                    bsf = (*heap)[0]->dist;
+                }
+
+            }
+            for(; i < ret->size(); ++i)
+                delete (*ret)[i];
+            delete ret;
+        }
+    }
+//    cout << this_thread::get_id() << endl;
+//    Const::logPrint( ": has finished after processing " +
+//                            to_string(internal_node) + " internal nodes and " +
+//                            to_string(leaf_node) + " leaf nodes");
+}
+
+void process_pq_mypq(double bsf, TimeSeries* queryTs, int k, vector<PqItemSeries*>* heap, SafeHashMap<FADASNode*, char>*visited,
+                     priority_queue<PqItemFadasId, vector<PqItemFadasId>, cmp_PqItemDumpyId>* pq){
+    PqItemFadasId cur;
+    double top_dist;
+    FADASNode* node;
+    int internal_node = 0, leaf_node = 0;
+    char _ = 0;
+    int len;
+    while(true){
+        {
+            lock_guard<mutex> gm(pq_mutex);
+            if (pq->empty()) break;
+            cur = pq->top();
+            pq->pop();
+        }
+        top_dist = cur.dist;
+        if(top_dist >= bsf) break;
+        node = cur.parent->children[cur.id];
+        if(visited->find(node, _)) continue;
+        visited->insert(node, _);
+        if(node->isInternalNode()){
+            ++internal_node;
+            len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax,
+                                                           node->bits_cardinality, node->chosenSegments, i);
+                if(dist < bsf){
+                    lock_guard<mutex>gm(pq_mutex);
+                    pq->emplace(node, i, dist);
+                }
+
+            }
+        }else{
+            load_node_cnt++;
+            search_num += node->size;
+            ++leaf_node;
+//            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            auto ret = node->search_SIMD(k,queryTs, Const::fidxfn, bsf);
+            int i=0;
+            {
+                lock_guard<mutex> g(m);
+                bsf = (*heap)[0]->dist;
+                for(;i<ret->size() && (*ret)[i]->dist < bsf ;++i){
+                    pop_heap(heap->begin(),  heap->end(), PqItemSeriesMaxHeap());
+                    delete heap->back();
+                    heap->pop_back();
+                    heap->push_back((*ret)[i]);
+                    push_heap(heap->begin(),  heap->end(), PqItemSeriesMaxHeap());
+                    bsf = (*heap)[0]->dist;
+                }
+
+            }
+            for(; i < ret->size(); ++i)
+                delete (*ret)[i];
+            delete ret;
+        }
+    }
+//    cout << this_thread::get_id() << endl;
+//    Const::logPrint( ": has finished after processing " +
+//                            to_string(internal_node) + " internal nodes and " +
+//                            to_string(leaf_node) + " leaf nodes");
+}
+
+void process_pq_messi(double bsf, TimeSeries* queryTs, int k, vector<PqItemSeries*>* heap, SafeHashMap<FADASNode*, char>*visited,
+                      priority_queue<PqItemFadasId, vector<PqItemFadasId>, cmp_PqItemDumpyId>* messi_pq, mutex* mu){
+    PqItemFadasId cur;
+    double top_dist;
+    FADASNode* node;
+    int internal_node = 0, leaf_node = 0;
+    char _ = 0;
+    int len;
+    while (true){
+        {
+            lock_guard<mutex> gm(*mu);
+            if(messi_pq->empty())   break;
+            cur = messi_pq->top();
+            messi_pq->pop();
+        }
+        top_dist = cur.dist;
+        if(top_dist >= bsf) break;
+        node = cur.parent->children[cur.id];
+        if(visited->find(node, _)) continue;
+        visited->insert(node, _);
+        assert(!node->isInternalNode());
+        load_node_cnt++;
+        search_num += node->size;
+        ++leaf_node;
+//            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+        auto ret = node->search_SIMD(k,queryTs, Const::fidxfn, bsf);
+        int i=0;
+        {
+            lock_guard<mutex> g(m);
+            bsf = (*heap)[0]->dist;
+            for(;i<ret->size() && (*ret)[i]->dist < bsf ;++i){
+                pop_heap(heap->begin(),  heap->end(), PqItemSeriesMaxHeap());
+                delete heap->back();
+                heap->pop_back();
+                heap->push_back((*ret)[i]);
+                push_heap(heap->begin(),  heap->end(), PqItemSeriesMaxHeap());
+                bsf = (*heap)[0]->dist;
+            }
+
+        }
+        for(; i < ret->size(); ++i)
+            delete (*ret)[i];
+        delete ret;
+    }
+}
+
+vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                        float *query_reordered, int *ordering){
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn, query_reordered, ordering);
+    SafeHashMap<FADASNode*, char>visited;
+    char _ = 0;
+    visited.insert(targetNode, _);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+
+    timeval io;
+    Const::timer_start(&io);
+    PriorityBlockingCollection<PqItemFadasId> pq;
+    for(int i =0;i<Const::vertexNum;++i){
+        if(root->children[i] == nullptr || visited.find(root->children[i], _))    continue;
+        double dist  = SaxUtil::getMinDist1stLayer(queryTs->paa , i);
+        pq.emplace(root, i, dist);
+    }
+    PREPARE_TIME += Const::timer_end(&io);
+
+    Const::timer_start(&io);
+    int pre_step = 20;
+    PqItemFadasId cur;
+    double top_dist;
+    FADASNode* node;
+    int len;
+    while(!pq.is_empty() && LOADED_NODE_CNT < pre_step){
+        pq.take_prio(cur);
+        top_dist = cur.dist;
+        if(top_dist >= bsf)  break;
+        node =cur.parent->children[cur.id];
+        if(visited.find(node, _)) continue;
+        visited.insert(node, _);
+        if(node->isInternalNode()){
+            len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax,
+                                                           node->bits_cardinality, node->chosenSegments, i);
+
+                if(dist < bsf){
+                    pq.emplace(node, i, dist);
+                }
+            }
+        }else{
+            ++LOADED_NODE_CNT;
+//            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            node->search_SIMD(k,queryTs,*heap, Const::fidxfn);
+            bsf = (*heap)[0]->dist;
+        }
+    }
+    DIST_CALC_TIME += Const::timer_end(&io);
+
+    Const::timer_start(&io);
+    if(!pq.is_empty() && top_dist < bsf){
+        // start a thread pool
+        int th_num = Const::thread_num;
+        load_node_cnt = LOADED_NODE_CNT;
+        search_num = _search_num;
+        vector<thread>thread_pool;
+        for(int i =0; i < th_num; ++i)
+            thread_pool.emplace_back(thread(process_pq,  bsf,queryTs, k, heap, &visited, &pq));
+        for(int i = 0; i < th_num; ++i)
+            thread_pool[i].join();
+        LOADED_NODE_CNT = load_node_cnt;
+        _search_num = search_num;
+    }
+    SEARCH_TIME += Const::timer_end(&io);
+
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+}
+
+vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_MyPq(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                            float *query_reordered, int *ordering){
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn, query_reordered, ordering);
+    SafeHashMap<FADASNode*, char>visited;
+    char _ = 0;
+    visited.insert(targetNode, _);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+
+    timeval io;
+    Const::timer_start(&io);
+    priority_queue<PqItemFadasId, vector<PqItemFadasId>, cmp_PqItemDumpyId> pq;
+    for(int i =0;i<Const::vertexNum;++i){
+        if(root->children[i] == nullptr || visited.find(root->children[i], _))    continue;
+        double dist  = SaxUtil::getMinDist1stLayer(queryTs->paa , i);
+        pq.emplace(root, i, dist);
+    }
+    PREPARE_TIME += Const::timer_end(&io);
+
+    Const::timer_start(&io);
+    int pre_step = 20;
+    PqItemFadasId cur;
+    double top_dist;
+    FADASNode* node;
+    int len;
+    while(!pq.empty() && LOADED_NODE_CNT < pre_step){
+        cur = pq.top();
+        pq.pop();
+        top_dist = cur.dist;
+        if(top_dist >= bsf)  break;
+        node =cur.parent->children[cur.id];
+        if(visited.find(node, _)) continue;
+        visited.insert(node, _);
+        if(node->isInternalNode()){
+            len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax,
+                                                           node->bits_cardinality, node->chosenSegments, i);
+                if(dist < bsf)
+                    pq.emplace(node, i, dist);
+            }
+        }else{
+            ++LOADED_NODE_CNT;
+//            node->search_SIMD_reordered(k, queryTs, *heap, Const::fidxfn, query_reordered, ordering);
+            node->search_SIMD(k,queryTs,*heap, Const::fidxfn);
+            bsf = (*heap)[0]->dist;
+        }
+    }
+    DIST_CALC_TIME += Const::timer_end(&io);
+
+    Const::timer_start(&io);
+    if(!pq.empty() && top_dist < bsf){
+        // start a thread pool
+        int th_num = Const::thread_num;
+        load_node_cnt = LOADED_NODE_CNT;
+        search_num = _search_num;
+        vector<thread>thread_pool;
+        for(int i =0; i < th_num; ++i)
+            thread_pool.emplace_back(thread(process_pq_mypq,  bsf, queryTs, k, heap, &visited, &pq));
+        for(int i = 0; i < th_num; ++i)
+            thread_pool[i].join();
+        LOADED_NODE_CNT = load_node_cnt;
+        _search_num = search_num;
+    }
+    SEARCH_TIME += Const::timer_end(&io);
+
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+}
+
+size_t hash_pointer(FADASNode* node){
+    static const auto shift = (size_t)log2(1 + sizeof(FADASNode));
+    return (size_t)(node) >> shift;
+}
+
+vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_MESSI(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                                 float *query_reordered, int *ordering){
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn, query_reordered, ordering);
+    vector<SafeHashMap<FADASNode*, char>>visited(Const::messi_pq_num);
+    char _ = 0;
+    for(auto & vis: visited)    vis.insert(targetNode, _);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+//    hash<FADASNode*> pointer_hash; // warning!!!  default is the pointer itself, so it must a multiple of 4.
+    vector<priority_queue<PqItemFadasId, vector<PqItemFadasId>, cmp_PqItemDumpyId>> messi_pqs(Const::messi_pq_num);
+
+    FADASNode* node;
+    int len;
+    double top_dist;
+
+    timeval io;
+    Const::timer_start(&io);
+    queue<FADASNode*>nodes_list;
+    nodes_list.push(root);
+    while(!nodes_list.empty()){
+        node = nodes_list.front();
+        nodes_list.pop();
+        assert(node->isInternalNode());
+        len = (1 << (node->chosenSegments.size()));
+        for(int i =0;i<len;++i){
+            if(node->children[i] == nullptr || visited[0].find(node->children[i], _))    continue;
+            top_dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax, node->bits_cardinality, node->chosenSegments, i);
+            if(top_dist >= bsf)  continue;
+            if(node->children[i]->isInternalNode()){
+                nodes_list.push(node->children[i]);
+            }else{
+                // the same node must be in the same queue
+                size_t pq_id = hash_pointer(node->children[i]) % Const::messi_pq_num;
+                messi_pqs[pq_id].emplace(node, i , top_dist);
+            }
+        }
+    }
+    PREPARE_TIME += Const::timer_end(&io);
+
+    Const::timer_start(&io);
+    {
+        // start a thread pool
+        int th_num = Const::thread_num;
+        load_node_cnt = LOADED_NODE_CNT;
+        search_num = _search_num;
+        vector<thread>thread_pool;
+//        vector<int>pq_sizes;
+//        pq_sizes.reserve(messi_pqs.size());
+//        for(auto & _: messi_pqs)
+//            pq_sizes.push_back(_.size());
+        vector<mutex>pq_mutexs(Const::messi_pq_num);
+        for(int i =0; i < th_num; ++i)
+            thread_pool.emplace_back(thread(process_pq_messi,  bsf, queryTs, k, heap, &visited[i % Const::messi_pq_num],
+                                            &messi_pqs[i % Const::messi_pq_num], &pq_mutexs[i % Const::messi_pq_num]));
+        for(int i = 0; i < th_num; ++i)
+            thread_pool[i].join();
+        LOADED_NODE_CNT = load_node_cnt;
+        _search_num = search_num;
+    }
+    SEARCH_TIME += Const::timer_end(&io);
+
+    delete queryTs;
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+}
+
+struct io_data{
+    int node_size{};
+    float lb_dist{};
+    int fd{};
+    float* tss{};
+};
+
+void raw_search_SIMD(float *tss, int size, float* query, vector<PqItemSeries *> &heap, int k, double& bsf){
+    double dist;
+    for(int i = 0; i < size; ++i){
+        dist = TimeSeriesUtil::euclideanDist_SIMD(query, tss + i * Const::tsLength , Const::tsLength, bsf);
+        if(heap.size() < k){
+            heap.push_back(new PqItemSeries(tss + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }else if(dist < bsf){
+            pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+            delete heap.back();
+            heap.pop_back();
+            heap.push_back(new PqItemSeries(tss + i * Const::tsLength, dist, false, true));
+            push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+        }
+        if(heap.size() >= k)    bsf = heap[0]->dist;
+    }
+
+    for(PqItemSeries*s: heap){
+        if(s->needDeepCopy) s->copyData();
+    }
+}
+
+vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_SSD(FADASNode* root, float *query, int k, vector<vector<int>> *g,
+                                                                  float *query_reordered, int *ordering){
+    vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn, query_reordered, ordering);
+    SafeHashMap<FADASNode*, char>visited;
+    char _ = 0;
+    visited.insert(targetNode, _);
+    make_heap(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    double bsf = (*heap)[0]->dist;
+    auto *queryTs = new TimeSeries(query);
+
+    priority_queue<PqItemFadasId, vector<PqItemFadasId>, cmp_PqItemDumpyId> pq;
+    for(int i =0;i<Const::vertexNum;++i){
+        if(root->children[i] == nullptr || visited.find(root->children[i], _))    continue;
+        double dist  = SaxUtil::getMinDist1stLayer(queryTs->paa , i);
+        pq.emplace(root, i, dist);
+    }
+
+    io_uring ring{};
+    auto ret = io_uring_queue_init(Const::SSD_pq_num, &ring, 0);
+    io_uring_sqe* sqe;
+    io_uring_cqe* cqe;
+    vector<vector<io_data>>io_buffer(2, vector<io_data>(Const::SSD_pq_num));
+    for(int i = 0; i < 2 ; ++i){
+        for(int j = 0; j < Const::SSD_pq_num; ++j){
+            io_buffer[i][j].tss = new float [Const::th * Const::tsLength];
+        }
+    }
+    int buffer_flag = 0, prev_buf_size =0, cur_buf_size = 0, err, len;
+    bool first_time = true;
+    PqItemFadasId cur;
+    double top_dist;
+    FADASNode* node; io_data* data;
+    size_t fd;
+    while(!pq.empty()){
+        cur = pq.top();
+        pq.pop();
+        top_dist = cur.dist;
+        if(top_dist >= bsf)  break;
+        node = cur.parent->children[cur.id];
+        if(node->isInternalNode()){
+            len = (1 << (node->chosenSegments.size()));
+            for(int i =0;i<len;++i){
+                if(node->children[i] == nullptr)    continue;
+                double dist = SaxUtil::LowerBound_Paa_iSax(queryTs->paa, node->sax,
+                                                           node->bits_cardinality, node->chosenSegments, i);
+                if(dist < bsf)
+                    pq.emplace(node, i, dist);
+            }
+        }else{
+            if(visited.find(node, _)) continue;
+            visited.insert(node, _);
+            ++LOADED_NODE_CNT;
+
+            sqe = io_uring_get_sqe(&ring);
+            assert(sqe);
+            auto & tmp = io_buffer[buffer_flag][cur_buf_size];
+            tmp.node_size = node->size;
+            tmp.lb_dist = top_dist;
+            string file = Const::fidxfn + node->getFileNameWrapper();
+            tmp.fd = open((file).c_str(), O_RDONLY);
+            assert(tmp.fd > 0);
+            io_uring_prep_read(sqe, tmp.fd, tmp.tss, ((unsigned)node->size) * Const::tsLength * sizeof(float), 0);
+            io_uring_sqe_set_data(sqe, &tmp);
+            ++cur_buf_size;
+            if(cur_buf_size == Const::SSD_pq_num){
+                if(!first_time){
+                    err = io_uring_wait_cqe_nr(&ring, &cqe, prev_buf_size);
+                    assert(err == 0);
+                    io_uring_cq_advance(&ring, prev_buf_size);
+                    err = io_uring_submit(&ring);
+                    assert(err == cur_buf_size);
+
+                    for(int i = 0 ; i < prev_buf_size; ++i){
+                        void * t = io_uring_cqe_get_data(cqe + i);
+                        data = reinterpret_cast<io_data *>(t);
+                        if(data->lb_dist < bsf){
+                            _search_num += data->node_size;
+                            raw_search_SIMD(data->tss, data->node_size, query, *heap, k, bsf);
+                        }
+                        assert(data->fd > 0);
+                        close(data->fd);
+                    }
+
+                }else{
+                    err = io_uring_submit(&ring);
+                    assert(err == cur_buf_size);
+                }
+                first_time = false;
+                prev_buf_size = cur_buf_size;
+                cur_buf_size = 0;
+                buffer_flag = 1 - buffer_flag;
+
+            }
+        }
+    }
+
+    err = io_uring_wait_cqe_nr(&ring, &cqe, prev_buf_size);
+    assert(err == 0);
+    io_uring_cq_advance(&ring, prev_buf_size);
+    if(cur_buf_size > 0) {
+        err = io_uring_submit(&ring);
+        assert(err == cur_buf_size);
+    }
+
+    for(int i = 0 ; i < prev_buf_size; ++i){
+        data = (io_data *)io_uring_cqe_get_data(cqe + i);
+        if(data->lb_dist < bsf){
+            _search_num += data->node_size;
+            raw_search_SIMD(data->tss, data->node_size, query, *heap, k, bsf);
+        }
+        assert(data->fd > 0);
+        close(data->fd);
+    }
+
+    if(cur_buf_size > 0){
+        err = io_uring_wait_cqe_nr(&ring, &cqe, cur_buf_size);
+        assert(err == 0);
+        io_uring_cq_advance(&ring, cur_buf_size);
+
+        for(int i = 0 ; i < cur_buf_size; ++i){
+            data = (io_data *)io_uring_cqe_get_data(cqe + i);
+            if(data->lb_dist < bsf){
+                _search_num += data->node_size;
+                raw_search_SIMD(data->tss, data->node_size, query, *heap, k, bsf);
+            }
+            assert(data->fd > 0);
+            close(data->fd);
+        }
+    }
+
+    delete queryTs;
+    io_uring_queue_exit(&ring);
+    for(int i = 0; i < 2 ; ++i)
+        for(int j = 0; j < Const::SSD_pq_num; ++j)
+            delete io_buffer[i][j].tss;
+
+    sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
+    return heap;
+}
 
 vector<PqItemSeries*>*FADASSearcher::exactSearchDTW(FADASNode* root, float *query, int k, vector<vector<int>> *g){
     vector<PqItemSeries*>* heap = approxSearchDTW(root, query, k, g, Const::fidxfn);

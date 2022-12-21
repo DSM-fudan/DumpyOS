@@ -7,7 +7,8 @@
 string Const::dataset = "",Const:: method = "";
 int Const::tsLength = -1, Const::maxK = -1, Const::index = -1, Const::ops = -1, Const::materialized = -1,
 Const::method_code = -1, Const::query_num = -1, Const::series_num = -1, Const::k = -1, Const::dtw_window_size = -1,
-Const::batch_size = -1, Const::batch_num = -1, Const::pre_read = -1;
+Const::batch_size = -1, Const::batch_num = -1, Const::pre_read = -1, Const::thread_num = -1, Const::messi_pq_num = -1,
+Const::SSD_pq_num = -1;
 double Const::dtw_window_percent = -1;
 
 //sec: parameter

@@ -30,7 +30,7 @@ using namespace std;
 extern long approxSearchTimeDetails[]{0,0,0,0}, approxSearchUnits[]{0,0,0,0};
 extern long LB_SERIES_TIME , HEAP_TIME ,
         LB_NODE_TIME_STAT , LB_NODE_CNT, LOADED_NODE_CNT, LOADED_PACK_CNT=0;
-extern double DIST_CALC_TIME , READ_TIME;
+extern double DIST_CALC_TIME ,READ_TIME, PREPARE_TIME, SEARCH_TIME;
 
 //void free_heap(vector<PqItemSeriesVector*>*heap){
 //    for(auto* x:*heap)
@@ -1553,7 +1553,7 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
     float query_reordered[Const::tsLength];
     int ordering[Const::tsLength];
     double duration[maxExprRound];  // ms
-    double read_time[maxExprRound];
+    double read_time[maxExprRound], prepare_time[maxExprRound], search_time[maxExprRound], dist_calc_time[maxExprRound];
     int load_node_cnt[maxExprRound];
     cout<<"------------------Experiment--------------------" << endl;
     cout<<"k: " << k << endl;
@@ -1563,12 +1563,14 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
         //                    cout<<"Round : " + (curRound + 1));
         c_nodes.clear();
         _search_num = 0;
-        READ_TIME = 0;
+        READ_TIME = 0;  PREPARE_TIME = 0; SEARCH_TIME = 0; DIST_CALC_TIME = 0;
         LOADED_NODE_CNT = 0;
         query = FileUtil::readSeries(f);
+//        if(curRound < 25)   continue;
+
         reorder_query(query, query_reordered, ordering);
         auto start = chrono::system_clock::now();
-        vector<PqItemSeries*> *approxKnn = FADASSearcher::exactSearchIdLevel(root, query, k, g, query_reordered, ordering);
+        vector<PqItemSeries*> *approxKnn = FADASSearcher::Par_exactSearchIdLevel_SSD(root, query, k, g, query_reordered, ordering);
         auto end = chrono::system_clock::now();
         duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count() / 1000.0;
 //                vector<float*>* exactKnn = getResult(Const::resfn, _k*maxExprRound + curRound, k);
@@ -1579,6 +1581,9 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
 
         load_node_cnt[curRound] = LOADED_NODE_CNT;
         read_time[curRound] = READ_TIME;
+        prepare_time[curRound] = PREPARE_TIME;
+        search_time[curRound] = SEARCH_TIME;
+        dist_calc_time[curRound] = DIST_CALC_TIME;
         recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
         search_number[curRound] = _search_num;
         cout << recallNums[curRound] << ";"  << (double)_search_num / root->size << ", ";
@@ -1597,6 +1602,12 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
     cout << endl;
     double total_read_time = 0;
     for(double _:read_time) {total_read_time += _; cout<<_/1000.0<<",";}
+    double total_prepare_time = 0;
+    for(double _:prepare_time)  total_prepare_time += _;
+    double total_search_time = 0;
+    for(auto _:search_time) total_search_time += _;
+    double total_dist_calc_time = 0;
+    for(auto _:dist_calc_time)  total_dist_calc_time += _;
     cout << endl;
     long total_node_cnt = 0;
     for(int _:load_node_cnt) { total_node_cnt += _; cout << (_) << ","; }
@@ -1612,6 +1623,9 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
     cout <<"Average Duration cost is " << totalDuration / maxExprRound << " ms" << endl;
 //            cout << "Avg. Distance Calculation time is " << DIST_CALC_TIME / 1000.0 / maxExprRound <<"ms."<<endl;
     cout << "AVG. I/O read time is " << total_read_time / 1000.0 / maxExprRound << "ms."<<endl;
+    cout << "AVG. prepare time is " << total_prepare_time / 1000.0 / maxExprRound << "ms."<<endl;
+    cout << "AVG. pre calc  time is " << total_dist_calc_time / 1000.0 / maxExprRound << "ms."<<endl;
+    cout << "AVG. parallel time is " << total_search_time / 1000.0 / maxExprRound << "ms."<<endl;
     cout << "Avg. Priority Queue nodes count = " << LB_NODE_CNT / maxExprRound <<endl;
     cout << "Avg. Loaded nodes count = " << total_node_cnt / maxExprRound << endl;
     cout << endl;
