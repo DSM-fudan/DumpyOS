@@ -45,6 +45,8 @@ public:
 
     static void exactSearchFADAS(FADASNode *root, vector<vector<int>> *g);
 
+    static void exactSearchDumpyParallel(FADASNode *root, vector<vector<int>>*g);
+
     static void exactSearchFADASDTW(FADASNode *root, vector<vector<int>>*g);
 
     static void exactSearchFADASNoExpr(FADASNode *root, vector<vector<int>> *g);

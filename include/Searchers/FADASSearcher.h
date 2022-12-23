@@ -1,11 +1,13 @@
 //
-// Created by pengwang5 on 2022/1/16.
+// Created by zeyuwang on 2022/1/16.
 //
 
 #ifndef MULGIFT_FADASSEARCHER_H
 #define MULGIFT_FADASSEARCHER_H
 #include <vector>
+#include <liburing.h>
 #include "../DataStructures/FADASNode.h"
+#include "../DataStructures/io_data.h"
 
 class FADASSearcher {
 public:
@@ -38,8 +40,10 @@ public:
     static vector<PqItemSeries*>*Par_exactSearchIdLevel_MESSI(FADASNode* root, float *query, int k, vector<vector<int>> *g,
                                                                              float *query_reordered, int *ordering);
 
-    static vector<PqItemSeries*>*Par_exactSearchIdLevel_SSD(FADASNode* root, float *query, int k, vector<vector<int>> *g,
-                                                                    float *query_reordered, int *ordering);
+    static vector<PqItemSeries *> *
+    Par_exactSearchIdLevel_SSD(FADASNode *root, float *query, int k, vector<vector<int>> *g,
+                               float *query_reordered, int *ordering, io_uring &ring,
+                               vector<vector<io_data>> &io_buffer);
 
     static vector<PqItemSeries*>* exactSearchDTW(FADASNode* root, float *query, int k, vector<vector<int>> *g);
 

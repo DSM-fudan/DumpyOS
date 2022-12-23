@@ -759,6 +759,12 @@ void exactExprFADAS(){
     Recall::exactSearchFADAS(root,g);
 }
 
+void exactExprFADASParallel(){
+    FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
+    auto *g = loadGraphSkeleton();
+    Recall::exactSearchDumpyParallel(root,g);
+}
+
 void exactExprFADASDTW(){
     FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
     auto *g = loadGraphSkeleton();
@@ -847,6 +853,12 @@ int main() {
                 case 10:
                     if(Const::materialized == 1)
                         ngSearch();
+                    else
+                        Const::logPrint("not supported now!");
+                    break;
+                case 11:
+                    if(Const::materialized == 1)
+                        exactExprFADASParallel();
                     else
                         Const::logPrint("not supported now!");
                     break;

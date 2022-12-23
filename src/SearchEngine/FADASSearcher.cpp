@@ -10,6 +10,7 @@
 #include <cmath>
 #include <queue>
 #include <io.h>
+#include <omp.h>
 #include "liburing.h"
 #include "../../include/Searchers/FADASSearcher.h"
 #include "../../include/Utils/MathUtil.h"
@@ -17,7 +18,7 @@
 #include "../../include/DataStructures/SafePq.h"
 #include "../../include/DataStructures/SafeHashMap.h"
 
-extern long LB_SERIES_TIME = 0, HEAP_TIME = 0,
+extern long LB_SERIES_TIME = 0, HEAP_TIME = 0, IO_URING_WAIT = 0,
     LB_NODE_TIME_STAT = 0, LB_NODE_CNT = 0, LOADED_NODE_CNT = 0;
 extern double DIST_CALC_TIME = 0, READ_TIME = 0, PREPARE_TIME = 0, SEARCH_TIME = 0;
 extern int layer, _search_num;
@@ -885,13 +886,6 @@ vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_MESSI(FADASNode* roo
     return heap;
 }
 
-struct io_data{
-    int node_size{};
-    float lb_dist{};
-    int fd{};
-    float* tss{};
-};
-
 void raw_search_SIMD(float *tss, int size, float* query, vector<PqItemSeries *> &heap, int k, double& bsf){
     double dist;
     for(int i = 0; i < size; ++i){
@@ -914,8 +908,30 @@ void raw_search_SIMD(float *tss, int size, float* query, vector<PqItemSeries *> 
     }
 }
 
-vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_SSD(FADASNode* root, float *query, int k, vector<vector<int>> *g,
-                                                                  float *query_reordered, int *ordering){
+void raw_search_SIMD_Par(float *tss, int size, float* query, vector<PqItemSeries *> &heap, int k, double& bsf){
+    double dist;
+    for(int i = 0; i < size; ++i){
+        dist = TimeSeriesUtil::euclideanDist_SIMD(query, tss + i * Const::tsLength , Const::tsLength, bsf);
+        if(dist >= bsf) continue;
+#pragma omp critical
+        {
+            bsf = heap[0]->dist;
+            if(dist < bsf){
+                pop_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+                delete heap.back();
+                heap.pop_back();
+                heap.push_back(new PqItemSeries(tss + i * Const::tsLength, dist, false, true));
+                push_heap(heap.begin(),  heap.end(), PqItemSeriesMaxHeap());
+                bsf = heap[0]->dist;
+            }
+        };
+    }
+}
+
+vector<PqItemSeries *> *FADASSearcher::Par_exactSearchIdLevel_SSD(FADASNode *root, float *query, int k,
+                                                                  vector<vector<int>> *g,
+                                                                  float *query_reordered, int *ordering, io_uring &ring,
+                                                                  vector<vector<io_data>> &io_buffer) {
     vector<PqItemSeries*>* heap = approxSearch(root, query, k, g, Const::fidxfn, query_reordered, ordering);
     SafeHashMap<FADASNode*, char>visited;
     char _ = 0;
@@ -931,22 +947,12 @@ vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_SSD(FADASNode* root,
         pq.emplace(root, i, dist);
     }
 
-    io_uring ring{};
-    auto ret = io_uring_queue_init(Const::SSD_pq_num, &ring, 0);
-    io_uring_sqe* sqe;
-    io_uring_cqe* cqe;
-    vector<vector<io_data>>io_buffer(2, vector<io_data>(Const::SSD_pq_num));
-    for(int i = 0; i < 2 ; ++i){
-        for(int j = 0; j < Const::SSD_pq_num; ++j){
-            io_buffer[i][j].tss = new float [Const::th * Const::tsLength];
-        }
-    }
+    io_uring_sqe* sqe; io_uring_cqe* cqe;
     int buffer_flag = 0, prev_buf_size =0, cur_buf_size = 0, err, len;
-    bool first_time = true;
-    PqItemFadasId cur;
-    double top_dist;
-    FADASNode* node; io_data* data;
-    size_t fd;
+    bool first_time = true; size_t fd; timeval io_time;
+    PqItemFadasId cur; double top_dist; FADASNode* node; io_data* data;
+//    unsigned head = 0; int times = 0; vector<io_data*>recieve(Const::SSD_pq_num);
+
     while(!pq.empty()){
         cur = pq.top();
         pq.pop();
@@ -976,25 +982,41 @@ vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_SSD(FADASNode* root,
             tmp.fd = open((file).c_str(), O_RDONLY);
             assert(tmp.fd > 0);
             io_uring_prep_read(sqe, tmp.fd, tmp.tss, ((unsigned)node->size) * Const::tsLength * sizeof(float), 0);
-            io_uring_sqe_set_data(sqe, &tmp);
+//            io_uring_sqe_set_data(sqe, &tmp);
             ++cur_buf_size;
             if(cur_buf_size == Const::SSD_pq_num){
                 if(!first_time){
+                    Const::timer_start(&io_time);
                     err = io_uring_wait_cqe_nr(&ring, &cqe, prev_buf_size);
+                    IO_URING_WAIT += Const::timer_end(&io_time);
                     assert(err == 0);
+
+//                    head = times = 0;
+//                    io_uring_for_each_cqe(&ring, head, cqe){
+//                        void * t = io_uring_cqe_get_data(cqe);
+//                        data = (io_data*)t;
+//                        recieve[times++] = (io_data*)t;
+//                        assert(data->fd > 0);
+//                        close(data->fd);
+//                    }
+//                    assert(times == prev_buf_size);
+
                     io_uring_cq_advance(&ring, prev_buf_size);
                     err = io_uring_submit(&ring);
                     assert(err == cur_buf_size);
 
-                    for(int i = 0 ; i < prev_buf_size; ++i){
-                        void * t = io_uring_cqe_get_data(cqe + i);
-                        data = reinterpret_cast<io_data *>(t);
-                        if(data->lb_dist < bsf){
-                            _search_num += data->node_size;
-                            raw_search_SIMD(data->tss, data->node_size, query, *heap, k, bsf);
+#pragma omp parallel for num_threads(Const::thread_num)
+                    for(int i = 0; i < prev_buf_size; ++i){
+                        auto &dat = io_buffer[1 - buffer_flag][i];
+                        close(dat.fd);
+                        if(dat.lb_dist < bsf){
+//                            _search_num += dat.node_size;
+                            raw_search_SIMD_Par(dat.tss, dat.node_size, query, *heap, k, bsf);
                         }
-                        assert(data->fd > 0);
-                        close(data->fd);
+                    }
+
+                    for(PqItemSeries*s: *heap){
+                        if(s->needDeepCopy) s->copyData();
                     }
 
                 }else{
@@ -1005,51 +1027,44 @@ vector<PqItemSeries*>*FADASSearcher::Par_exactSearchIdLevel_SSD(FADASNode* root,
                 prev_buf_size = cur_buf_size;
                 cur_buf_size = 0;
                 buffer_flag = 1 - buffer_flag;
-
             }
         }
     }
 
     err = io_uring_wait_cqe_nr(&ring, &cqe, prev_buf_size);
     assert(err == 0);
+
     io_uring_cq_advance(&ring, prev_buf_size);
     if(cur_buf_size > 0) {
         err = io_uring_submit(&ring);
         assert(err == cur_buf_size);
     }
 
-    for(int i = 0 ; i < prev_buf_size; ++i){
-        data = (io_data *)io_uring_cqe_get_data(cqe + i);
-        if(data->lb_dist < bsf){
-            _search_num += data->node_size;
-            raw_search_SIMD(data->tss, data->node_size, query, *heap, k, bsf);
+    for(int i = 0; i < prev_buf_size; ++i){
+        auto &dat = io_buffer[1 - buffer_flag][i];
+        close(dat.fd);
+        if(dat.lb_dist < bsf){
+            _search_num += dat.node_size;
+            raw_search_SIMD(dat.tss, dat.node_size, query, *heap, k, bsf);
         }
-        assert(data->fd > 0);
-        close(data->fd);
     }
 
     if(cur_buf_size > 0){
         err = io_uring_wait_cqe_nr(&ring, &cqe, cur_buf_size);
         assert(err == 0);
-        io_uring_cq_advance(&ring, cur_buf_size);
 
+        io_uring_cq_advance(&ring, cur_buf_size);
         for(int i = 0 ; i < cur_buf_size; ++i){
-            data = (io_data *)io_uring_cqe_get_data(cqe + i);
-            if(data->lb_dist < bsf){
-                _search_num += data->node_size;
-                raw_search_SIMD(data->tss, data->node_size, query, *heap, k, bsf);
+            auto& dat = io_buffer[buffer_flag][i];
+            close(dat.fd);
+            if(dat.lb_dist < bsf){
+                _search_num += dat.node_size;
+                raw_search_SIMD(dat.tss, dat.node_size, query, *heap, k, bsf);
             }
-            assert(data->fd > 0);
-            close(data->fd);
         }
     }
 
     delete queryTs;
-    io_uring_queue_exit(&ring);
-    for(int i = 0; i < 2 ; ++i)
-        for(int j = 0; j < Const::SSD_pq_num; ++j)
-            delete io_buffer[i][j].tss;
-
     sort(heap->begin(), heap->end(), PqItemSeriesMaxHeap());
     return heap;
 }
