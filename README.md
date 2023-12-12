@@ -1,8 +1,6 @@
-# FADAS: An accurate and scalable data series index
+# DumpyOS: A Data-Adaptive Multi-ary Index for Scalable Data Series Similarity Search (VLDB Journal under review)
 
-FADAS is an enhanced version of iSAX, focusing on the building efficiency and accuracy on approximate queries.
-A memory version is also provided.
-If you can tolerate 30% ~ 100% more disk occupancy and need more search accuracy, FADAS-fuzzy is a much better choice.
+DumpyOS is an enhanced version of Dumpy, focusing on the building efficiency, search accuracy and pruning-based search efficiency.
 
 # License
 This archive is free for use for academic and non-profit purposes, but if you use it, please reference it properly.
