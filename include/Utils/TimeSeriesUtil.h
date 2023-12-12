@@ -92,6 +92,10 @@ public:
 
     static float euclideanDist_SIMD(float *query_reordered, float *ts, int size, double bound, int *order);
 
+    static float lb_keogh_data_bound(float* qo, float* upperLemire, float* lowerLemire, float* cb, int len, float bsf);
+
+    static float dtwsimd(const float* A, const float* B, float* cb, int len, int r, float bsf, float* tSum, float* pCost, float* rDist);
+
 //    static void knnWithBsf(const DSTreeNode &node, InsertedSeries &queryTs, int k, vector<PqItemSeriesVector *> &heap);
 //
 //    static vector<PqItemSeriesVector *> & knnVector(const DSTreeNode &node, InsertedSeries &q, int k);

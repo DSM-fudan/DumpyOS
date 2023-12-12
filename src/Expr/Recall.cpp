@@ -17,6 +17,7 @@
 #include "../../include/Const.h"
 #include "../../include/TAR/TARGNode.h"
 #include <string>
+//#include <gperftools/profiler.h>
 #include <iostream>
 #include <cstdio>
 #include <vector>
@@ -28,9 +29,9 @@ using namespace std;
 //            LBSeriesTime2 = 0, LBNodeTime2=0, DSTreeSearchTime2 =0, IOBigTime2 = 0, distBigTime2 = 0, DSTreeNodeApproxTime2 = 0, heapBigTime2 = 0, DSTreePreparePqTime2 =0,DSTreeProcessPqTime2 =0,
 //            approxSearchTime = 0, exactSearchTime = 0, wallClockTime = 0, hashTableTime = 0, LBSeriesCnt = 0;
 extern long approxSearchTimeDetails[]{0,0,0,0}, approxSearchUnits[]{0,0,0,0};
-extern long LB_SERIES_TIME , HEAP_TIME , IO_URING_WAIT,
+extern long LB_SERIES_TIME , HEAP_TIME , IO_URING_WAIT, IO_ACTUAL_WAIT,
         LB_NODE_TIME_STAT , LB_NODE_CNT, LOADED_NODE_CNT, LOADED_PACK_CNT=0;
-extern double DIST_CALC_TIME ,READ_TIME, PREPARE_TIME, SEARCH_TIME;
+extern double DIST_CALC_TIME ,READ_TIME, PREPARE_TIME, SEARCH_TIME, NON_OVERLAP_TIME, CPU_TIME, PREV_TIME, WAIT_TIME, TAIL_TIME;
 
 //void free_heap(vector<PqItemSeriesVector*>*heap){
 //    for(auto* x:*heap)
@@ -1033,7 +1034,8 @@ void Recall::doExprWithResFADAS(FADASNode *root, vector<vector<int>> *g, const s
 void Recall::ngSearchDumpy(FADASNode *root, vector<vector<int>> *g) {
     int maxExprRound = Const::query_num;
     Const::logPrint( "result file is " + Const::resfn);
-    int nprobes[]{1,3,5,10, 20, 35, 50 ,75, 100, 130};
+    int nprobes[]{10, 15, 20, 25, 35, 50 ,75, 100, 130};
+//    int nprobes[]{1,3,5,10, 20, 35, 50 ,75, 100, 130};
 //    int nprobes[]{50};
 //    int ks[]{25};
     int thresholds[]{10000};
@@ -1065,6 +1067,101 @@ void Recall::ngSearchDumpy(FADASNode *root, vector<vector<int>> *g) {
                 reorder_query(query, query_ts_reordered, ordering);
                 auto start = chrono::system_clock::now();
                 vector<PqItemSeries*> *approxKnn = FADASSearcher::ngSearch(root, query, query_ts_reordered, ordering, Const::k,g, probe);
+                auto end = chrono::system_clock::now();
+//                for(int i=0;i<256;++i)
+//                    cout << (*approxKnn)[0]->ts[i] <<",";
+                vector<float*>* exactKnn = getResult(Const::resfn, offset + curRound, Const::k);
+                vector<PqItemSeries*> exactKnn2;
+                for(float *t: *exactKnn)
+                    exactKnn2.push_back(new PqItemSeries(t, query));
+
+//                layer = 4;
+//                analyzePrintSax(approxKnn,exactKnn, query);
+                duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count();
+                recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
+                search_number[curRound] = _search_num;
+                error_ratio[curRound] = MathUtil::errorRatio(*approxKnn, exactKnn2, Const::k);
+                inv_error_ratio[curRound] = MathUtil::invertedErrorRatio(*approxKnn, exactKnn2, Const::k);
+//                cout << curRound << ":"<<recallNums[curRound] << endl;
+                cout << recallNums[curRound] << ",";
+                fflush(stdout);
+                free_heap(approxKnn);
+                for(int i=0;i<Const::k;++i)
+                    delete[] (*exactKnn)[i];
+                delete exactKnn;
+                delete[] query;
+            }
+            ++_k;
+            cout << fixed  << endl;
+//            for(int _:layers)   cout << _ << ",";
+//            cout << endl;
+//            for(double _:error_ratio)   cout << _ << ",";
+            int totalRecallNum = 0;
+            for(int temp:recallNums)
+                totalRecallNum += temp;
+            cout<<"\nAverage Recall rate is : " << (float)totalRecallNum / (float) (maxExprRound * Const::k)<< endl;
+            double totalErrorRatio = 0;
+            for(double _:error_ratio)   totalErrorRatio += _;
+            cout<<"Average Error ratio is : " << totalErrorRatio / (float) (maxExprRound)<< endl;
+//            double totalinvErrorRatio = 0;
+//            for(double _:inv_error_ratio)   totalinvErrorRatio += _;
+//            cout<<"Average inv Error ratio is : " << totalinvErrorRatio / (float) (maxExprRound)<< endl;
+            double total_duration = 0;
+            for(long _:duration)    total_duration += _;
+            total_duration /= (double ) maxExprRound;
+            cout<<"Average duration is : " << total_duration/1000.0 << "ms. "
+                <<"And QPM = "<< 60000000.0 / total_duration <<endl;
+            for(int _:search_number)    cout << _ <<",";
+            cout << endl;
+            rewind(f);
+        }
+    }
+
+    fclose(f);
+}
+
+void Recall::ngSearchDumpyParallel(FADASNode *root, vector<vector<int>> *g) {
+    int maxExprRound = Const::query_num;
+    Const::logPrint( "result file is " + Const::resfn);
+    int nprobes[]{10, 15, 20, 25, 35, 50 ,75, 100, 130};
+//    int nprobes[]{3};
+    vector<vector<io_data>>io_buffer(2, vector<io_data>(Const::SSD_pq_num));
+//    int nprobes[]{50};
+//    int ks[]{25};
+    for(int i = 0; i < 2 ; ++i)
+        for(int j = 0; j < Const::SSD_pq_num; ++j)
+            io_buffer[i][j].tss = new float [Const::th * Const::tsLength];
+
+    int thresholds[]{10000};
+    root->assignLeafNum();
+    float *query;
+    float query_ts_reordered[Const::tsLength];
+    int ordering[Const::tsLength];
+    FILE *f = fopen(Const::queryfn.c_str(), "rb");
+    long offset = 0;
+    fseek(f, offset * Const::tsLengthBytes, SEEK_SET);
+    for(int threshold:thresholds){
+        int _k = 0;
+        for(int probe:nprobes){
+            int recallNums[maxExprRound];
+            int search_number[maxExprRound];
+            int layers[maxExprRound];
+            long duration[maxExprRound];
+            double error_ratio[maxExprRound];
+            double inv_error_ratio[maxExprRound];
+            cout<<"------------------Experiment--------------------" << endl;
+            cout<<"nprobe: " << probe << endl;
+            cout<<"threshold: " << threshold<< endl;
+
+            for(int curRound = 0; curRound < maxExprRound; ++curRound){
+                //                    cout<<"Round : " + (curRound + 1));
+                c_nodes.clear();
+                _search_num = 0;
+                query = FileUtil::readSeries(f);
+                reorder_query(query, query_ts_reordered, ordering);
+                auto start = chrono::system_clock::now();
+                vector<PqItemSeries*> *approxKnn = FADASSearcher::Par_ngSearch(root, query, query_ts_reordered, ordering,
+                                                                           Const::k,g, probe, io_buffer);
                 auto end = chrono::system_clock::now();
 //                for(int i=0;i<256;++i)
 //                    cout << (*approxKnn)[0]->ts[i] <<",";
@@ -1212,8 +1309,8 @@ void Recall::doExprWithResIncFADAS(FADASNode *root, vector<vector<int>> *g, cons
     Const::logPrint( "result file is " + Const::resfn);
     int k = Const::k;
 //    int ks[]{10};
-    int node_nums[]{1,2,3,4,5, 10, 25};
-//    int node_nums[]{50};
+    int node_nums[]{1,2,3,4,5,10,25};
+//    int node_nums[]{25};
     float *query;
     float query_reordered[Const::tsLength];
     int ordering[Const::tsLength];
@@ -1237,6 +1334,7 @@ void Recall::doExprWithResIncFADAS(FADASNode *root, vector<vector<int>> *g, cons
             c_nodes.clear();
             _search_num = 0;
             query = FileUtil::readSeries(f);
+//            if(curRound < 12)    continue;
             reorder_query(query, query_reordered, ordering);
             auto start = chrono::system_clock::now();
             vector<PqItemSeries*> *approxKnn = FADASSearcher::approxIncSearch(root, query, k, index_dir, node_num,
@@ -1463,7 +1561,7 @@ void Recall::doExprWithResIncFADASDTW(FADASNode *root, vector<vector<int>> *g, c
 void Recall::doExprWithResIncFADASFuzzy(FADASNode *root, vector<vector<int>> *g, const string &index_dir) {
     int maxExprRound = Const::query_num;
     Const::logPrint( "result file is " + Const::resfn);
-    int k = 1;
+    int k = Const::k;
 //    int ks[]{10};
     int node_nums[]{1,2,3,4,5,10,25};
 //    int node_nums[]{10};
@@ -1540,6 +1638,94 @@ void Recall::doExprWithResIncFADASFuzzy(FADASNode *root, vector<vector<int>> *g,
     fclose(f);
 }
 
+void Recall::multiwayDumpySearch(FADASNode *root, vector<vector<int>> *g, const string &index_dir) {
+    int maxExprRound = Const::query_num;
+    Const::logPrint( "result file is " + Const::resfn);
+    int k = Const::k;
+//    int ks[]{10};
+    int node_nums[]{1,2,3,4,5, 10, 25};
+//    int node_nums[]{10};
+    float *query;
+    float query_reordered[Const::tsLength];
+    int*mask = MathUtil::generateMask(Const::segmentNum);
+    int ordering[Const::tsLength];
+    root->assignLeafNum();
+    FILE *f = fopen(Const::queryfn.c_str(), "rb");
+    long offset = 0;
+    fseek(f, offset * Const::tsLengthBytes, SEEK_SET);
+    for(int node_num: node_nums){
+        int recallNums[maxExprRound];
+        int search_number[maxExprRound];
+        int layers[maxExprRound], rest_nodes[maxExprRound];
+        long duration[maxExprRound];
+        double error_ratio[maxExprRound];
+        double inv_error_ratio[maxExprRound];
+        cout<<"------------------Experiment--------------------" << endl;
+        cout<<"k: " << k << endl;
+        cout<<"node number: " << node_num<< endl;
+
+        for(int curRound = 0; curRound < maxExprRound; ++curRound){
+            //                    cout<<"Round : " + (curRound + 1));
+            c_nodes.clear();
+            _search_num = 0;
+            query = FileUtil::readSeries(f);
+//            if(curRound < 1)    continue;
+            reorder_query(query, query_reordered, ordering);
+            auto start = chrono::system_clock::now();
+            vector<PqItemSeries*> *approxKnn = FADASSearcher::multiWayApproxSearch(root, query, k, g, index_dir, node_num,
+                                                                              mask, query_reordered, ordering);
+            auto end = chrono::system_clock::now();
+            vector<float*>* exactKnn = getResult(Const::resfn, offset + curRound, k);
+            vector<PqItemSeries*> exactKnn2;
+            for(float *t: *exactKnn)
+                exactKnn2.push_back(new PqItemSeries(t, query));
+
+            duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count();
+            layers[curRound] = __layer;
+            rest_nodes[curRound] = nrest;
+            recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
+            search_number[curRound] = _search_num;
+            error_ratio[curRound] = MathUtil::errorRatio(*approxKnn, exactKnn2, k);
+            inv_error_ratio[curRound] = MathUtil::invertedErrorRatio(*approxKnn, exactKnn2, k);
+//                cout << curRound << ":"<<recallNums[curRound] << endl;
+            cout << recallNums[curRound] << ",";
+            fflush(stdout);
+            free_heap(approxKnn);
+            for(int i=0;i<k;++i)
+                delete[] (*exactKnn)[i];
+            delete exactKnn;
+            delete[] query;
+        }
+        cout << fixed  << endl;
+        for(int _:layers)   cout << _ << ",";
+        cout << endl;
+        for(int _:rest_nodes)   cout << _ << ",";
+        cout << endl;
+//            for(double _:error_ratio)   cout << _ << ",";
+        int totalRecallNum = 0;
+        for(int temp:recallNums)
+            totalRecallNum += temp;
+        cout<<"\nAverage Recall rate is : " << (float)totalRecallNum / (float) (maxExprRound * k)<< endl;
+        double totalErrorRatio = 0;
+        for(double _:error_ratio)   totalErrorRatio += _;
+        cout<<"Average Error ratio is : " << totalErrorRatio / (float) (maxExprRound)<< endl;
+        double totalinvErrorRatio = 0;
+        for(double _:inv_error_ratio)   totalinvErrorRatio += _;
+        cout<<"Average inv Error ratio is : " << totalinvErrorRatio / (float) (maxExprRound)<< endl;
+        double total_duration = 0;
+        for(long _:duration)    total_duration += _;
+        total_duration /= (double ) maxExprRound;
+        cout<<"Average duration is : " << total_duration / 1000.0 << "us. "
+            <<"And QPM = "<< 60000000.0 / total_duration <<endl;
+        for(int _:search_number)    cout << _ <<",";
+        cout << endl;
+        rewind(f);
+
+    }
+
+    fclose(f);
+}
+
 void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
     int maxExprRound = Const::query_num;
     Const::logPrint( "result file is " + Const::resfn);
@@ -1559,6 +1745,8 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
     cout<<"k: " << k << endl;
     cout << fixed << setprecision(3);
 
+//    FILE* resf = fopen(Const::resfn.c_str(), "wb");
+
     for(int curRound = 0; curRound < maxExprRound; ++curRound){
         //                    cout<<"Round : " + (curRound + 1));
         c_nodes.clear();
@@ -1566,11 +1754,11 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
         READ_TIME = 0;  PREPARE_TIME = 0; SEARCH_TIME = 0; DIST_CALC_TIME = 0;
         LOADED_NODE_CNT = 0;
         query = FileUtil::readSeries(f);
-//        if(curRound < 25)   continue;
+//        if(curRound < 1)   continue;
 
         reorder_query(query, query_reordered, ordering);
         auto start = chrono::system_clock::now();
-        vector<PqItemSeries*> *approxKnn = FADASSearcher::Par_exactSearchIdLevel_MESSI(root, query, k, g, query_reordered,
+        vector<PqItemSeries*> *approxKnn = FADASSearcher::exactSearchIdLevel(root, query, k, g, query_reordered,
                                                                                      ordering);
         auto end = chrono::system_clock::now();
         duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count() / 1000.0;
@@ -1579,6 +1767,11 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
         vector<PqItemSeries*> exactKnn2;
         for(float *t: *exactKnn)
             exactKnn2.push_back(new PqItemSeries(t, query));
+
+//        for(int i = 0; i < k; ++i){
+//            auto ts = (*approxKnn)[i]->ts;
+//            fwrite(ts, sizeof(float), Const::tsLength, resf);
+//        }
 
         load_node_cnt[curRound] = LOADED_NODE_CNT;
         read_time[curRound] = READ_TIME;
@@ -1597,6 +1790,8 @@ void Recall::exactSearchFADAS(FADASNode *root, vector<vector<int>>*g) {
         delete[] query;
     }
     cout << endl;
+
+//    fclose(resf);
 
     double totalDuration = 0;
     for(double _:duration)  {totalDuration += _; cout<< _ << ",";}
@@ -1642,6 +1837,7 @@ void Recall::exactSearchDumpyParallel(FADASNode *root, vector<vector<int>>*g) {
 
     float *query;
     FILE *f = fopen(Const::queryfn.c_str(), "rb");
+    vector<vector<io_data>>io_buffer(2, vector<io_data>(Const::SSD_pq_num));
     int k = Const::k;
     int recallNums[maxExprRound];
     LB_NODE_CNT = 0;
@@ -1649,102 +1845,234 @@ void Recall::exactSearchDumpyParallel(FADASNode *root, vector<vector<int>>*g) {
     float query_reordered[Const::tsLength];
     int ordering[Const::tsLength];
     double duration[maxExprRound];  // ms
-    double read_time[maxExprRound], prepare_time[maxExprRound], search_time[maxExprRound], dist_calc_time[maxExprRound];
+    double read_time[maxExprRound], prev_time[maxExprRound], tail_time[maxExprRound], cpu_time[maxExprRound],
+    wait_time[maxExprRound], non_overlap_time[maxExprRound];
     int load_node_cnt[maxExprRound];
     cout<<"------------------Experiment--------------------" << endl;
     cout<<"k: " << k << endl;
-    cout << fixed << setprecision(3);
+    cout << fixed << setprecision(4);
 
-    io_uring ring{};
-//    io_uring_params params{};
-//    params.flags |= IORING_SETUP_SQPOLL;
-//    params.sq_thread_idle = 8000;
-    auto ret = io_uring_queue_init(Const::SSD_pq_num, &ring, 0);
-    vector<vector<io_data>>io_buffer(2, vector<io_data>(Const::SSD_pq_num));
     for(int i = 0; i < 2 ; ++i)
         for(int j = 0; j < Const::SSD_pq_num; ++j)
             io_buffer[i][j].tss = new float [Const::th * Const::tsLength];
 
-
+    string profile_name = to_string(Const::thread_num) + "ths-" +to_string(Const::SSD_pq_num);
+//    ProfilerStart(profile_name.c_str());
     for(int curRound = 0; curRound < maxExprRound; ++curRound){
         //                    cout<<"Round : " + (curRound + 1));
         c_nodes.clear();
         _search_num = 0;
-        READ_TIME = 0;  PREPARE_TIME = 0; SEARCH_TIME = 0; DIST_CALC_TIME = 0; IO_URING_WAIT = 0;
-        LOADED_NODE_CNT = 0;
+        READ_TIME = 0;  WAIT_TIME = 0; SEARCH_TIME = 0; TAIL_TIME = 0;
+        LOADED_NODE_CNT = 0; PREV_TIME = 0; CPU_TIME = 0, NON_OVERLAP_TIME = 0;
         query = FileUtil::readSeries(f);
-//        if(curRound < 25)   continue;
+//        if(curRound < 11)   continue;
 
         reorder_query(query, query_reordered, ordering);
         auto start = chrono::system_clock::now();
-        vector<PqItemSeries*> *approxKnn = FADASSearcher::Par_exactSearchIdLevel_SSD(root, query, k, g, query_reordered,
-                                                                                     ordering, ring, io_buffer);
+        vector<PqItemSeries*> *approxKnn = FADASSearcher::Par_exactSearchIdLevel_SSDV3_multithread(root, query, k, g, query_reordered,
+                                                                                     ordering, io_buffer);
         auto end = chrono::system_clock::now();
         duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count() / 1000.0;
 //                vector<float*>* exactKnn = getResult(Const::resfn, _k*maxExprRound + curRound, k);
-        vector<float*>* exactKnn = getResult(Const::resfn, curRound, k);
-        vector<PqItemSeries*> exactKnn2;
-        for(float *t: *exactKnn)
-            exactKnn2.push_back(new PqItemSeries(t, query));
+//        vector<float*>* exactKnn = getResult(Const::resfn, curRound, k);
+//        vector<PqItemSeries*> exactKnn2;
+//        for(float *t: *exactKnn)
+//            exactKnn2.push_back(new PqItemSeries(t, query));
+//        sort(exactKnn2.begin(), exactKnn2.end(), PqItemSeriesMaxHeap());
 
         load_node_cnt[curRound] = LOADED_NODE_CNT;
-        read_time[curRound] = IO_URING_WAIT;
-        prepare_time[curRound] = PREPARE_TIME;
-        search_time[curRound] = SEARCH_TIME;
-        dist_calc_time[curRound] = DIST_CALC_TIME;
-        recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
+        read_time[curRound] = READ_TIME;
+        cpu_time[curRound] = CPU_TIME;
+        prev_time[curRound] = PREV_TIME;
+        non_overlap_time[curRound] = NON_OVERLAP_TIME;
+        tail_time[curRound] = TAIL_TIME;
+        wait_time[curRound] = WAIT_TIME;
+//        recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
         search_number[curRound] = _search_num;
-        cout << recallNums[curRound] << ";"  << (double)_search_num / root->size << ", ";
+//        cout << recallNums[curRound] << ";"  << IO_ACTUAL_WAIT / 1000.0 << ", ";
+        cout <<  duration[curRound]  << ", " ;
         fflush(stdout);
 //                analyzePrintSaxFADAS(approxKnn, exactKnn, query);
         free_heap(approxKnn);
-        for(int i=0;i<k;++i)
-            delete[] (*exactKnn)[i];
-        delete exactKnn;
+//        for(int i=0;i<k;++i)
+//            delete[] (*exactKnn)[i];
+//        delete exactKnn;
         delete[] query;
+
+//        if(curRound > 0 && curRound % 25 == 0){
+//            cout << endl << curRound <<endl;
+//            double totalDuration = 0;
+//            for(double _:duration)  {totalDuration += _; }
+//            cout << "Now " << totalDuration / 1000.0 << "s, on average " << totalDuration / 1000.0 / curRound <<"s" <<endl;
+//        }
     }
     cout << endl;
 
-    io_uring_queue_exit(&ring);
     for(int i = 0; i < 2 ; ++i)
         for(int j = 0; j < Const::SSD_pq_num; ++j)
             delete io_buffer[i][j].tss;
 
     double totalDuration = 0;
-    for(double _:duration)  {totalDuration += _; cout<< _ << ",";}
+    for(double _:duration)  {totalDuration += _;
+//        cout<< _ << ",";
+    }
     cout << endl;
     double total_read_time = 0;
-    for(double _:read_time) {total_read_time += _; cout<<_/1000.0<<",";}
-    double total_prepare_time = 0;
-    for(double _:prepare_time)  total_prepare_time += _;
-    double total_search_time = 0;
-    for(auto _:search_time) total_search_time += _;
-    double total_dist_calc_time = 0;
-    for(auto _:dist_calc_time)  total_dist_calc_time += _;
+    for(double _:read_time) {total_read_time += _;
+//        cout<<_/1000.0<<",";
+    }
+    double total_wait_time = 0;
+    for(double _:wait_time){total_wait_time += _;}
+    double total_non_overlap_time = 0;
+    for(double _:non_overlap_time){total_non_overlap_time += _;}
+    double total_prev_time = 0;
+    for(double _:prev_time) total_prev_time += _;
+    double total_tail_time = 0;
+    for(auto _:tail_time) total_tail_time += _;
+    double total_CPU_time = 0;
+    for(auto _:cpu_time) total_CPU_time += _;
     cout << endl;
     long total_node_cnt = 0;
-    for(int _:load_node_cnt) { total_node_cnt += _; cout << (_) << ","; }
+    for(int _:load_node_cnt) { total_node_cnt += _;
+//        cout << (_) << ",";
+    }
     cout << endl;
     long totalSearchNum = 0;
-    for(int _:search_number) { totalSearchNum += _; cout << (_ / (double)root->size) << ","; }
+    for(int _:search_number) { totalSearchNum += _;
+//        cout << (_ / (double)root->size) << ",";
+    }
     cout << endl;
     int totalRecallNum = 0;
     for(int temp:recallNums)
         totalRecallNum += temp;
-    cout<<"\nAverage Recall rate is : " << (float)totalRecallNum / (float) (maxExprRound * k)<< endl;
+//    cout<<"\nAverage Recall rate is : " << (float)totalRecallNum / (float) (maxExprRound * k)<< endl;
     cout << "Average Search rate is " <<(double)totalSearchNum / ((double)maxExprRound * root->size)<<endl;
     cout <<"Average Duration cost is " << totalDuration / maxExprRound << " ms" << endl;
 //            cout << "Avg. Distance Calculation time is " << DIST_CALC_TIME / 1000.0 / maxExprRound <<"ms."<<endl;
-    cout << "AVG. I/O read time is " << total_read_time / 1000.0 / maxExprRound << "ms."<<endl;
-    cout << "AVG. prepare time is " << total_prepare_time / 1000.0 / maxExprRound << "ms."<<endl;
-    cout << "AVG. pre calc  time is " << total_dist_calc_time / 1000.0 / maxExprRound << "ms."<<endl;
-    cout << "AVG. parallel time is " << total_search_time / 1000.0 / maxExprRound << "ms."<<endl;
-    cout << "Avg. Priority Queue nodes count = " << LB_NODE_CNT / maxExprRound <<endl;
+    cout << "AVG. I/O time is " << total_read_time / 1000.0 / maxExprRound << "ms."<<endl;
+    cout << "AVG. CPU time (in the loop) is " << total_CPU_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. CPU waiting I/O time is " <<total_wait_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. I/O waiting CPU time is " <<total_non_overlap_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. prev time is " << total_prev_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. tail time is " << total_tail_time / 1000.0 / maxExprRound << "ms." << endl;
+//    cout << "Avg. Priority Queue nodes count = " << LB_NODE_CNT / maxExprRound <<endl;
     cout << "Avg. Loaded nodes count = " << total_node_cnt / maxExprRound << endl;
     cout << endl;
-    rewind(f);
+    fclose(f);
+}
 
+void Recall::exactSearchDumpyParallelDTW(FADASNode *root, vector<vector<int>>*g) {
+    int maxExprRound = Const::query_num;
+    Const::logPrint( "result file is " + Const::resfn);
 
+    float *query;
+    FILE *f = fopen(Const::queryfn.c_str(), "rb");
+    vector<vector<io_data>>io_buffer(2, vector<io_data>(Const::SSD_pq_num));
+    int k = Const::k;
+    int recallNums[maxExprRound];
+    LB_NODE_CNT = 0;
+    int search_number[maxExprRound];
+    float query_reordered[Const::tsLength];
+    int ordering[Const::tsLength];
+    double duration[maxExprRound];  // ms
+    double read_time[maxExprRound], prev_time[maxExprRound], tail_time[maxExprRound], cpu_time[maxExprRound],
+            wait_time[maxExprRound], non_overlap_time[maxExprRound];
+    int load_node_cnt[maxExprRound];
+    cout<<"------------------Experiment--------------------" << endl;
+    cout<<"k: " << k << endl;
+    cout << fixed << setprecision(4);
+
+    for(int i = 0; i < 2 ; ++i)
+        for(int j = 0; j < Const::SSD_pq_num; ++j)
+            io_buffer[i][j].tss = new float [Const::th * Const::tsLength];
+
+    for(int curRound = 0; curRound < maxExprRound; ++curRound){
+        //                    cout<<"Round : " + (curRound + 1));
+        c_nodes.clear();
+        _search_num = 0;
+        READ_TIME = 0;  WAIT_TIME = 0; SEARCH_TIME = 0; TAIL_TIME = 0; IO_URING_WAIT = 0; IO_ACTUAL_WAIT = 0;
+        LOADED_NODE_CNT = 0; PREV_TIME = 0; CPU_TIME = 0, NON_OVERLAP_TIME = 0;
+        query = FileUtil::readSeries(f);
+//        if(curRound < 15)   continue;
+
+        reorder_query(query, query_reordered, ordering);
+        auto start = chrono::system_clock::now();
+        vector<PqItemSeries*> *approxKnn = FADASSearcher::Par_exactSearch_DTW(root, query, k, g, query_reordered,
+                                                                                       ordering, io_buffer);
+        auto end = chrono::system_clock::now();
+        duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count() / 1000.0;
+
+        load_node_cnt[curRound] = LOADED_NODE_CNT;
+        read_time[curRound] = READ_TIME;
+        cpu_time[curRound] = CPU_TIME;
+        prev_time[curRound] = PREV_TIME;
+        non_overlap_time[curRound] = NON_OVERLAP_TIME;
+        tail_time[curRound] = TAIL_TIME;
+        wait_time[curRound] = WAIT_TIME;
+//        recallNums[curRound] = TimeSeriesUtil::intersectionTsSetsCardinality(approxKnn, exactKnn);
+        search_number[curRound] = _search_num;
+//        cout << recallNums[curRound] << ";"  << IO_ACTUAL_WAIT / 1000.0 << ", ";
+        cout <<  WAIT_TIME  << ":" << NON_OVERLAP_TIME <<", " ;
+        fflush(stdout);
+//                analyzePrintSaxFADAS(approxKnn, exactKnn, query);
+        free_heap(approxKnn);
+//        for(int i=0;i<k;++i)
+//            delete[] (*exactKnn)[i];
+//        delete exactKnn;
+        delete[] query;
+    }
+    cout << endl;
+
+    for(int i = 0; i < 2 ; ++i)
+        for(int j = 0; j < Const::SSD_pq_num; ++j)
+            delete io_buffer[i][j].tss;
+
+    double totalDuration = 0;
+    for(double _:duration)  {totalDuration += _;
+//        cout<< _ << ",";
+    }
+    cout << endl;
+    double total_read_time = 0;
+    for(double _:read_time) {total_read_time += _;
+//        cout<<_/1000.0<<",";
+    }
+    double total_wait_time = 0;
+    for(double _:wait_time){total_wait_time += _;}
+    double total_non_overlap_time = 0;
+    for(double _:non_overlap_time){total_non_overlap_time += _;}
+    double total_prev_time = 0;
+    for(double _:prev_time) total_prev_time += _;
+    double total_tail_time = 0;
+    for(auto _:tail_time) total_tail_time += _;
+    double total_CPU_time = 0;
+    for(auto _:cpu_time) total_CPU_time += _;
+    cout << endl;
+    long total_node_cnt = 0;
+    for(int _:load_node_cnt) { total_node_cnt += _;
+//        cout << (_) << ",";
+    }
+    cout << endl;
+    long totalSearchNum = 0;
+    for(int _:search_number) { totalSearchNum += _;
+//        cout << (_ / (double)root->size) << ",";
+    }
+    cout << endl;
+    int totalRecallNum = 0;
+    for(int temp:recallNums)
+        totalRecallNum += temp;
+//    cout<<"\nAverage Recall rate is : " << (float)totalRecallNum / (float) (maxExprRound * k)<< endl;
+    cout << "Average Search rate is " <<(double)totalSearchNum / ((double)maxExprRound * root->size)<<endl;
+    cout <<"Average Duration cost is " << totalDuration / maxExprRound << " ms" << endl;
+//            cout << "Avg. Distance Calculation time is " << DIST_CALC_TIME / 1000.0 / maxExprRound <<"ms."<<endl;
+    cout << "AVG. I/O time is " << total_read_time / 1000.0 / maxExprRound << "ms."<<endl;
+    cout << "AVG. CPU time (in the loop) is " << total_CPU_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. CPU waiting I/O time is " <<total_wait_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. I/O waiting CPU time is " <<total_non_overlap_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. prev time is " << total_prev_time / 1000.0 / maxExprRound << "ms." << endl;
+    cout << "AVG. tail time is " << total_tail_time / 1000.0 / maxExprRound << "ms." << endl;
+//    cout << "Avg. Priority Queue nodes count = " << LB_NODE_CNT / maxExprRound <<endl;
+    cout << "Avg. Loaded nodes count = " << total_node_cnt / maxExprRound << endl;
+    cout << endl;
     fclose(f);
 }
 
@@ -1771,8 +2099,9 @@ void Recall::exactSearchFADASDTW(FADASNode *root, vector<vector<int>>*g) {
         READ_TIME = 0;
         LOADED_NODE_CNT = 0;
         query = FileUtil::readSeries(f);
+//        if(curRound < 5)    continue;
         auto start = chrono::system_clock::now();
-        vector<PqItemSeries*> *approxKnn = FADASSearcher::exactSearchDTW(root, query, k, g);
+        vector<PqItemSeries*> *approxKnn = FADASSearcher::exactSearchDTWIdLevel(root, query, k, g);
         auto end = chrono::system_clock::now();
         duration[curRound] = chrono::duration_cast<chrono::microseconds>(end - start).count() / 1000.0;
 //                vector<float*>* exactKnn = getResult(Const::resfn, _k*maxExprRound + curRound, k);
@@ -1826,6 +2155,7 @@ void Recall::exactSearchFADASDTW(FADASNode *root, vector<vector<int>>*g) {
     fclose(f);
 }
 
+// deprecated
 void Recall::exactSearchFADASNoExpr(FADASNode *root, vector<vector<int>>*g) {
 //    int series_num = FileUtil::getFileSize(Const::datafn.c_str()) / Const::tsLengthBytes;
     int series_num = root->size;

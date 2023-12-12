@@ -9,6 +9,7 @@ struct io_data{
     int node_size{};
     float lb_dist{};
     int fd{};
+    FILE*f{};
     float* tss{};
 };
 

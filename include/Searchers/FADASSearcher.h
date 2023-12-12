@@ -5,7 +5,7 @@
 #ifndef MULGIFT_FADASSEARCHER_H
 #define MULGIFT_FADASSEARCHER_H
 #include <vector>
-#include <liburing.h>
+//#include <liburing.h>
 #include "../DataStructures/FADASNode.h"
 #include "../DataStructures/io_data.h"
 
@@ -18,6 +18,11 @@ public:
     static vector<PqItemSeries *> *
     approxSearch(FADASNode *root, float *query, int k, vector<vector<int>> *g, const string &index_dir,
                  float *query_reordered, int *ordering);
+
+    static vector<PqItemSeries *> *multiWayApproxSearch(FADASNode *root, float *query, int k, vector<vector<int>> *g,
+                                                        const string &index_dir, int node_num, const int *mask,
+                                                        float *query_reordered,
+                                                        int *ordering);
 
     static void approxSearchInterNodeDTW(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,
                                                         vector<PqItemSeries *> *heap, const string &index_dir);
@@ -40,12 +45,40 @@ public:
     static vector<PqItemSeries*>*Par_exactSearchIdLevel_MESSI(FADASNode* root, float *query, int k, vector<vector<int>> *g,
                                                                              float *query_reordered, int *ordering);
 
-    static vector<PqItemSeries *> *
-    Par_exactSearchIdLevel_SSD(FADASNode *root, float *query, int k, vector<vector<int>> *g,
-                               float *query_reordered, int *ordering, io_uring &ring,
-                               vector<vector<io_data>> &io_buffer);
+//    static vector<PqItemSeries *> *
+//    Par_exactSearchIdLevel_SSD(FADASNode *root, float *query, int k, vector<vector<int>> *g,
+//                               float *query_reordered, int *ordering, io_uring &ring,
+//                               vector<vector<io_data>> &io_buffer);
+//
+//    static vector<PqItemSeries *> *Par_exactSearchIdLevel_SSDV2(FADASNode *root, float *query, int k,
+//                                                                   vector<vector<int>> *g,
+//                                                                   float *query_reordered, int *ordering, io_uring &ring,
+//                                                                   vector<vector<io_data>> &io_buffer);
+
+    static vector<PqItemSeries *> *Par_exactSearchIdLevel_SSDV3(FADASNode *root, float *query, int k,
+                                                                   vector<vector<int>> *g,
+                                                                   float *query_reordered, int *ordering,
+                                                                   vector<vector<io_data>> &io_buffer);
+
+    static vector<PqItemSeries *> *Par_exactSearchIdLevel_SSDV3_multithread(FADASNode *root, float *query, int k,
+                                                                vector<vector<int>> *g,
+                                                                float *query_reordered, int *ordering,
+                                                                vector<vector<io_data>> &io_buffer);
+
+
+    static vector<PqItemSeries *> *Par_exactSearch_DTW(FADASNode *root, float *query, int k,
+                                                                      vector<vector<int>> *g,
+                                                                      float *query_reordered, int *ordering,
+                                                                      vector<vector<io_data>> &io_buffer);
+
+//    static vector<PqItemSeries *> *Par_exactSearchIdLevel_SSDV2_DTW(FADASNode *root, float *query, int k,
+//                                                                   vector<vector<int>> *g,
+//                                                                   float *query_reordered, int *ordering, io_uring &ring,
+//                                                                   vector<vector<io_data>> &io_buffer);
 
     static vector<PqItemSeries*>* exactSearchDTW(FADASNode* root, float *query, int k, vector<vector<int>> *g);
+
+    static vector<PqItemSeries*>*exactSearchDTWIdLevel(FADASNode* root, float *query, int k, vector<vector<int>> *g);
 
     static vector<PqItemSeries *> *exactSearchPos(FADASNode *root, float *query, int k, vector<vector<int>> *g);
 
@@ -70,6 +103,11 @@ public:
     static
     vector<PqItemSeries *> *ngSearch(FADASNode *root, float *query, float *query_reordered, int *ordering, int k,
                                      vector<vector<int>> *g, int nprobes);
+
+    static vector<PqItemSeries *> *Par_ngSearch(FADASNode *root, float *query, float *query_reordered, int *ordering,
+                                               int k,
+                                               vector<vector<int>> *g, int nprobes,
+                                               vector<vector<io_data>> &io_buffer);
 
     static void
     approxIncSearchInterNode(FADASNode *root, TimeSeries *queryTs, unsigned short *sax, int k,

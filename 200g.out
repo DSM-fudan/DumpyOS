@@ -1,0 +1,110 @@
+dataset: rand
+method: 
+index: 1
+materialized: 1
+ops: 11
+maxK: 50
+query_num: 100000
+messi_pq_num: 1
+SSD_pq_num: 24
+series_num: 200000000
+k: 50
+thread_num: 6
+batch_size: 1400000
+batch_num: 50
+pre_read: 1
+dtw_window_percent: 0.05
+th: 10000
+fbl_size: 32768
+max_diff: 3
+bitsCardinality: 8
+boundary_1st: 0.3
+boundary: 0.3
+imbalance: 0.3
+small_perc: 1
+f_low: 0.5
+f_high: 1.5
+alpha: 0.2
+max_mask_bit_percentage: 0.5
+tardis_sample_percent: 1
+max_replica: 2
+filling_factor_1st: 0.8
+filling_factor: 0.5
+max_radius: 6
+graphfn: ../RowGraph_16_3.bin
+bitsReserve: 3
+tsLength: 256
+paafn: /mnt/c/Series4Similarity_Search/rand/paa/rand-256-100m-16.bin
+saxfn: /mnt/c/Series4Similarity_Search/rand/sax/rand-256-200m-16.bin
+idxfn: 
+fidxfn: /home/wzy/data/rand/index-200g/
+posidxfn: 
+fuzzyidxfn: /home/wzy/data/rand/fuzzy/
+datafn: /home/wzy/data/rand/rand-256-200m.bin
+queryfn: /home/wzy/data/rand/rand-256-100k.bin
+resfn: /mnt/c/Series4Similarity_Search/rand/rand-256-200-50.bin
+dtwresfn: /mnt/c/Series4Similarity_Search/rand/rand-256-200-50-dtw2.bin
+dstreefn: /mnt/c/Series4Similarity_Search/ds-tree/rand/
+tardisfn: /mnt/c/Series4Similarity_Search/ds-tree/rand/
+buffer_series_num: 16777215
+22:13:48: result file is /mnt/c/Series4Similarity_Search/rand/rand-256-200-50.bin
+------------------Experiment--------------------
+k: 50
+dataset: rand
+method: 
+index: 1
+materialized: 1
+ops: 11
+maxK: 50
+query_num: 100000
+messi_pq_num: 1
+SSD_pq_num: 24
+series_num: 200000000
+k: 50
+thread_num: 6
+batch_size: 1400000
+batch_num: 50
+pre_read: 1
+dtw_window_percent: 0.05
+th: 10000
+fbl_size: 32768
+max_diff: 3
+bitsCardinality: 8
+boundary_1st: 0.3
+boundary: 0.3
+imbalance: 0.3
+small_perc: 1
+f_low: 0.5
+f_high: 1.5
+alpha: 0.2
+max_mask_bit_percentage: 0.5
+tardis_sample_percent: 1
+max_replica: 2
+filling_factor_1st: 0.8
+filling_factor: 0.5
+max_radius: 6
+graphfn: ../RowGraph_16_3.bin
+bitsReserve: 3
+tsLength: 256
+paafn: /mnt/c/Series4Similarity_Search/rand/paa/rand-256-100m-16.bin
+saxfn: /mnt/c/Series4Similarity_Search/rand/sax/rand-256-200m-16.bin
+idxfn: 
+fidxfn: /home/wzy/data/rand/index-200g/
+posidxfn: 
+fuzzyidxfn: /home/wzy/data/rand/fuzzy/
+datafn: /home/wzy/data/rand/rand-256-200m.bin
+queryfn: /home/wzy/data/rand/rand-256-100k.bin
+resfn: /mnt/c/Series4Similarity_Search/rand/rand-256-200-50.bin
+dtwresfn: /mnt/c/Series4Similarity_Search/rand/rand-256-200-50-dtw2.bin
+dstreefn: /mnt/c/Series4Similarity_Search/ds-tree/rand/
+tardisfn: /mnt/c/Series4Similarity_Search/ds-tree/rand/
+buffer_series_num: 16777215
+22:13:58: result file is /mnt/c/Series4Similarity_Search/rand/rand-256-200-50.bin
+------------------Experiment--------------------
+k: 50
+500
+Now 12615.663s, on average 25.231s
+1000
+Now 24757.016s, on average 24.757s
+1500
+Now 35323.807s, on average 23.549s

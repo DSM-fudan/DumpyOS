@@ -1093,6 +1093,59 @@ double SaxUtil::LowerBound_Paa_iSax(const float *paa, const unsigned short *sax,
     return frontCoef * sum;
 }
 
+double SaxUtil::getMinDist1stLayerDTW(const double *paaU, const double *paaL, int id){
+    double breakpoint_lower, breakpoint_upper;
+    double distance = 0;
+    for(int i=Const::segmentNum-1;i>=0;--i){
+        if(id %2 == 1){
+            breakpoint_lower = 0;
+            breakpoint_upper = 999;
+        }else{
+            breakpoint_upper = 0;
+            breakpoint_lower = -999;
+        }
+        id >>=1;
+
+        if (breakpoint_lower > paaU[i]) {
+            distance += ((breakpoint_lower - paaU[i]) * (breakpoint_lower - paaU[i]));
+        }
+        else if(breakpoint_upper < paaL[i]) {
+            distance += ((breakpoint_upper - paaL[i]) * (breakpoint_upper - paaL[i]));
+        }
+
+    }
+    return Const::tsLengthPerSegment * distance;
+}
+
+double SaxUtil::minidist_paa_to_isax_DTW(const double *paaU, const double *paaL, const unsigned short *sax,
+                                         const int* bits_cardinality, vector<int>&chosen_segs, int new_id){
+    double distance = 0;
+    double breakpoint_lower, breakpoint_upper;
+    int saxValue, cur = chosen_segs.size() - 1, bc;
+
+    for (int i = Const::segmentNum-1; i >= 0; --i) {
+        if(cur >=0 && chosen_segs[cur] == i){
+            saxValue = (sax[i] << 1) + (new_id % 2);
+            new_id >>= 1;
+            bc = bits_cardinality[i] + 1;
+            --cur;
+        } else {
+            saxValue = sax[i];
+            bc = bits_cardinality[i];
+        }
+        getValueRange(saxValue, bc, &breakpoint_lower, &breakpoint_upper);
+
+        if (breakpoint_lower > paaU[i]) {
+            distance += ((breakpoint_lower - paaU[i]) * (breakpoint_lower - paaU[i]));
+        }
+        else if(breakpoint_upper < paaL[i]) {
+            distance += ((breakpoint_upper - paaL[i]) * (breakpoint_upper - paaL[i]));
+        }
+    } // for
+
+    return Const::tsLengthPerSegment * distance;
+}
+
 double SaxUtil::minidist_paa_to_isax_DTW(const double *paaU, const double *paaL ,  const unsigned short *sax,
                                const int*sax_cardinalities)
 {
@@ -1193,6 +1246,24 @@ int SaxUtil::extendSax(const unsigned short *sax, const int *bits_cardinality, v
     }
     return res;
 }
+
+// return the new id
+int SaxUtil::extendSaxFuzzy(const unsigned short *sax, const unsigned short* node_sax, const int *bits_cardinality, vector<int> &segments) {
+    int res = 0, sw, osw;
+    for(int segment:segments){
+        osw = sax[segment] >> (Const::bitsCardinality - bits_cardinality[segment]);
+        if(node_sax[segment] < osw){
+            res = (res << 1) + 1;
+        }else if(node_sax[segment] > osw){
+            res = (res << 1);
+        }else{
+            sw = sax[segment] >> (Const::bitsCardinality - bits_cardinality[segment] - 1);
+            res = (res << 1) + (sw % 2);
+        }
+    }
+    return res;
+}
+
 
 // return the new id
 int SaxUtil::extendSax(const unsigned short *sax, const int *bits_cardinality, vector<int> &segments,

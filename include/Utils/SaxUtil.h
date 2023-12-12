@@ -117,6 +117,8 @@ public:
 
     static int extendSax(const unsigned short *sax, const int *bits_cardinality, vector<int> &segments);
 
+    static int extendSaxFuzzy(const unsigned short *sax, const unsigned short* node_sax, const int *bits_cardinality, vector<int> &segments);
+
     static int invSaxHeadFromSax(const unsigned short *sax, int bitsCardinality, int segmentNum);
 
     static double
@@ -125,6 +127,11 @@ public:
                         int new_id);
 
     static double LowerBound_Paa_iSax(const float *paa, const unsigned short *sax, const int *bits_cardinality);
+
+    static double getMinDist1stLayerDTW(const double *paaU, const double *paaL, int id);
+
+    static double minidist_paa_to_isax_DTW(const double *paaU, const double *paaL, const unsigned short *sax,
+                                                    const int* bits_cardinality, vector<int>&chosen_segs, int new_id);
 
     static int extendSax(const unsigned short *sax, const int *bits_cardinality, vector<int> &segments,
                   const unsigned short *parent_sax);

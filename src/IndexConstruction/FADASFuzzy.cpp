@@ -244,8 +244,6 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
     auto * paa_mu_part_units = new vector<vector<double> >(Const::vertexNum, vector<double>(Const::segmentNum, 0));
     // get 1st layer node size
     for(long i=0;i<series_num;++i){
-//        if(i == 10294926)
-//            cout << i << endl;
         unsigned short *asax = saxes + i * Const::segmentNum;
         int nav_id = SaxUtil::invSaxHeadFromSax(asax, Const::bitsCardinality, Const::segmentNum);
         float *paa = paas + i * Const::segmentNum;
@@ -269,7 +267,6 @@ FADASNode*  FADASNode::BuildIndexFuzzy(const string & datafn, const string & sax
         for(int j = 0;j<Const::segmentNum;++j)
             (*paa_mu_part_units)[i][j] /= nodeIn1stLayer[i].size;
         if(nodeIn1stLayer[i].size > Const::th) {
-//            assert(nodeIn1stLayer[i].size > Const::th);
             root->children[i] = new FADASNode(1, nodeIn1stLayer[i].size, i);
             root->children[i]->generateSaxAndCardIn1stLayer(i);
             internal_size += root->children[i]->size;
@@ -575,7 +572,7 @@ void FADASNode::fuzzySeriesInPartUnit(partUnit *part_units, int actual_size, int
                     ++n;
                 }
             }else{  // temp node is an internal node
-                assert(navigating_tbl[temp_node].actual_size > Const::th);
+//                assert(navigating_tbl[temp_node].actual_size > Const::th);
                 temp_node->size++;
                 temp_node->offsets.push_back(node_offsets[j]);
                 navigating_tbl[temp_node].series_index_list.push_back(series_index_list[j]);
@@ -595,8 +592,6 @@ void FADASNode::fuzzySeriesInPartUnitInFirstLayer(vector<partUnit> &part_units, 
     int new_id;
     vector<CAND>candidates;
     for(int j=0; j < part_units[_id].size; ++j){
-//        if(j == 31068)
-//            cout << j << endl;
         paa = FADASNode::paas + (long)node_offsets[j] * Const::segmentNum;
         for(int i=0;i<Const::segmentNum;++i){
             new_id = _id ^ mask[i];
@@ -646,16 +641,11 @@ void FADASNode::fuzzyFirstLayer(vector<partUnit> &part_units, const int *nav_ids
             node_offsets[i].reserve(part_units[i].size);
     }
     for(int i=0;i<this->size; ++i){
-//        if(i == 4492048){
-//            cout << "here"<< endl;
-//        }
         if(part_units[nav_ids[i]].size <= Const::th)
             node_offsets[nav_ids[i]].push_back(i);
     }
     for(int i=0;i<Const::vertexNum;++i){
         if(children[i] == nullptr)  continue;
-//        if(i == 1020)
-//            cout <<i << endl;
         if(this->children[i]->partition_id == -1)
             fuzzySeriesInPartUnitInFirstLayer(part_units, this->children[i]->offsets, i, navigating_tbl,
                                               paa_mu_part_units);

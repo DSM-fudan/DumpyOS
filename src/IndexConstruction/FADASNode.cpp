@@ -7,14 +7,15 @@
 #include <cmath>
 #include <bitset>
 #include <unordered_map>
-#include "liburing.h"
+//#include "liburing.h"
 #include "../../include/DataStructures/FADASNode.h"
 #include "../../include/Utils/FileUtil.h"
 #include "../../include/Utils/MathUtil.h"
 #include "../../include/Utils/TimeSeriesUtil.h"
-#include "../../include/Utils/SaxUtil.h"
+#include "../../include/DataStructures/SafeHashMap.h"
 
 unsigned short *FADASNode::saxes = nullptr;
+unsigned short **FADASNode::sax_tbl = nullptr;
 float *FADASNode::paas = nullptr;
 int *** FADASNode::combines = nullptr;
 int * FADASNode::combine_num = nullptr;
@@ -25,9 +26,10 @@ extern long LB_SERIES_TIME, HEAP_TIME;
 extern double DIST_CALC_TIME,READ_TIME;
 static long MAT1_CPU_TIME_STAT = 0, MAT1_CPU_TIME_COPY = 0, MAT1_WRITE_TIME = 0, MAT1_TOTAL_TIME = 0, MAT1_READ_TIME = 0,
         MAT2_CPU_TIME = 0, MAT2_WRITE_TIME = 0, MAT2_TOTAL_TIME = 0, SAX_PAA_TOTAL_TIME = 0, MAT2_READ_TIME = 0,
-        GROW_CPU_TIME = 0,  GROW_CPU_TIME_1st = 0, GROW_TOTAL_TIME = 0, SMALL_FILES_BYTES_WRITE = 0, SMALL_FILES_BYTES_READ = 0,
+        GROW_CPU_TIME = 0,  GROW_CPU_TIME_1st = 0, GROW_TOTAL_TIME = 0, WAIT_TIME_1 = 0, WAIT_TIME_2 = 0,
+        SMALL_FILES_BYTES_WRITE = 0, SMALL_FILES_BYTES_READ = 0,
         RAND_READ_CNT = 0, RAND_WRITE_CNT = 0, SEQ_READ_CNT = 0, SEQ_WRITE_CNT = 0,
-        SAX_WRITE_TIME = 0;
+        SAX_WRITE_TIME = 0, SAX_WAIT_TIME = 0;
 
 void FADASNode::loadCombines(){
     string base = "../combines/" + to_string(Const::segmentNum) + "-";
@@ -70,6 +72,14 @@ FADASNode* FADASNode::route(const unsigned short *_sax){
     return children[nav_id]->route(_sax);
 }
 
+FADASNode* FADASNode::routeFuzzySeries(const unsigned short *_sax){
+    if(!isInternalNode())
+        return this;
+    int nav_id = SaxUtil::extendSaxFuzzy(_sax, sax, bits_cardinality, chosenSegments);
+    if(children[nav_id] == nullptr) return this;
+    return children[nav_id]->routeFuzzySeries(_sax);
+}
+
 void FADASNode::routeDuringInsertion(const unsigned short *_sax, int pos){
     ++size;
     if(size > Const::f_high * Const::th * (1 << chosenSegments.size())){
@@ -99,7 +109,7 @@ FADASNode* FADASNode::route1step(const unsigned short *_sax){
     return children[nav_id];
 }
 
-extern int _search_num, layer;
+extern int _search_num, layer, __layer;
 void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap, const string &index_dir,
                        float *query_reordered, int *ordering) const{
     assert(!isInternalNode());
@@ -124,7 +134,7 @@ void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap,
     fread(ts, sizeof(float), size * Const::tsLength, f);
     READ_TIME += Const::timer_end(&io);
 
-    _search_num += size; ::layer = FADASNode::layer;
+    ::layer = FADASNode::layer; __layer = FADASNode::layer;
     for(int i=0;i<size;++i){
 //        struct timeval start{};
 //        Const::timer_start(&start);
@@ -270,7 +280,6 @@ vector<PqItemSeries *>* FADASNode::search_SIMD(int k, TimeSeries* queryTs, const
     string fn = index_dir+ getFileName();
     if(partition_id == -1)  fn += "_L";
     auto ret = new vector<PqItemSeries *>();
-
     struct timeval io{};
     Const::timer_start(&io);
     auto *ts = new float[size * Const::tsLength];
@@ -371,16 +380,11 @@ void FADASNode::search(int k, TimeSeries *queryTs, vector<PqItemSeries *> &heap,
     double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
     string fn = index_dir+ getFileName();
     if(partition_id == -1)  fn += "_L";
-//    long fs = FileUtil::getFileSize(fn.c_str());
-//    int series_num = fs / Const::tsLengthBytes;
-//    assert(series_num == size);
 
     FILE *f = fopen(fn.c_str(), "rb");
     struct timeval io{};
     Const::timer_start(&io);
     auto *ts = new float[size * Const::tsLength];
-//    for(int i=0;i<size;++i)
-//        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
     fread(ts, sizeof(float), size * Const::tsLength, f);
     READ_TIME += Const::timer_end(&io);
 
@@ -418,26 +422,18 @@ void FADASNode::searchDTW(int k, TimeSeries *queryTs, vector<PqItemSeries *> &he
     assert(!isInternalNode());
     double bsf = heap.size() < k? numeric_limits<double>::max() : heap[0]->dist;
     string fn = index_dir+ getFileName();
-
-//    long fs = FileUtil::getFileSize(fn.c_str());
-//    int series_num = fs / Const::tsLengthBytes;
-//    assert(series_num == size);
+    if(partition_id == -1)  fn += "_L";
 
     FILE *f = fopen(fn.c_str(), "rb");
     struct timeval io{};
     Const::timer_start(&io);
     auto *ts = new float[size * Const::tsLength];
-//    for(int i=0;i<size;++i)
-//        fread(ts + i * Const::tsLength, sizeof(float), Const::tsLength, f);
     fread(ts, sizeof(float), size * Const::tsLength, f);
     READ_TIME += Const::timer_end(&io);
 
     _search_num += size; ::layer = FADASNode::layer;
     for(int i=0;i<size;++i){
-//        struct timeval start{};
-//        Const::timer_start(&start);
         double dist = TimeSeriesUtil::dtw(queryTs->ts, ts + i * Const::tsLength, Const::tsLength,Const::dtw_window_size, bsf);
-//        DIST_CALC_TIME += Const::timer_end(&start);
 
         if(heap.size() < k){
             heap.push_back(new PqItemSeries(ts + i * Const::tsLength, dist, false, true));
@@ -867,6 +863,8 @@ void materialize1stLayerWithSaxOnlyLeaf(string datafn, FADASNode* root, int *nav
     FILE *f = fopen(datafn.c_str(), "r");
     long rest = root->size, total = root->size, cur = 0;
     unordered_map<FADASNode*, FBL_UNIT>fbl;
+    unsigned tss_size = Const::fbl_series_num * Const::tsLength;
+    auto *tss = new float[tss_size];
 
     RAND_READ_CNT++;
     SEQ_READ_CNT += rest;
@@ -878,7 +876,6 @@ void materialize1stLayerWithSaxOnlyLeaf(string datafn, FADASNode* root, int *nav
         long num;
         if(rest > Const::fbl_series_num)    num = Const::fbl_series_num;
         else num = rest;
-        auto *tss = new float[num * Const::tsLength];
 
         auto end = chrono::system_clock::now();
         fread(tss, sizeof(float),num * Const::tsLength,  f);
@@ -926,7 +923,6 @@ void materialize1stLayerWithSaxOnlyLeaf(string datafn, FADASNode* root, int *nav
         }
         end = chrono::system_clock::now();
         MAT1_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
-        delete[] tss;
 
         rest-=num;
         cur += num;
@@ -935,12 +931,902 @@ void materialize1stLayerWithSaxOnlyLeaf(string datafn, FADASNode* root, int *nav
     }
 
     fclose(f);
-//    delete[] navids;
+    delete[]tss;
     auto end_t = chrono::system_clock::now();
     MAT1_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
 }
 
-void materializeAllLeavesWithSax(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+void materialize1stLayerWithSaxOnlyLeaf2(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short**sax_tbl){
+    auto start_sax = chrono::system_clock::now();
+    Const::logPrint("Start move sax to disk file in 1st layer.");
+    unordered_set<FADASNode*>visited;
+    for(auto &child:root->children){
+        if(child == nullptr || child->size > Const::th || visited.contains(child))  continue;
+        visited.insert(child);
+        long symbol_num = (long)child->size * Const::segmentNum;
+        auto to_write = new unsigned short[symbol_num];
+
+        for(int i=0;i< child->offsets.size();++i){
+            long offset =child->offsets[i];
+            copy(sax_tbl[offset], sax_tbl[offset] + Const::segmentNum, to_write + i * Const::segmentNum);
+        }
+        string outfile = index_dir + "1_";
+        if(child->partition_id == -1)
+            outfile +=  to_string(child->id) + "_sax_L";
+        else
+            outfile += to_string(child->partition_id) + "_sax";
+        FILE *outf = fopen(outfile.c_str(), "wb");
+        fwrite(to_write, sizeof(unsigned short), symbol_num,outf);
+        fclose(outf);
+        delete[] to_write;
+        vector<int>().swap(child->offsets);
+    }
+    unordered_set<FADASNode*>().swap(visited);
+    auto end_sax = chrono::system_clock::now();
+    SAX_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end_sax - start_sax).count();
+
+    auto start_t = chrono::system_clock::now();
+    Const::logPrint("Start move data to disk file in 1st layer.");
+    FILE *f = fopen(datafn.c_str(), "r");
+    long rest = root->size, total = root->size, cur = 0;
+    unordered_map<FADASNode*, FBL_UNIT>fbl;
+    unsigned tss_size = Const::fbl_series_num * Const::tsLength;
+    auto *tss = new float[tss_size];
+
+    RAND_READ_CNT++;
+    SEQ_READ_CNT += rest;
+
+    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+    // This may incur many write calls.
+    while(rest > 0){
+        fbl.clear();
+        long num;
+        if(rest > Const::fbl_series_num)    num = Const::fbl_series_num;
+        else num = rest;
+
+        auto end = chrono::system_clock::now();
+        fread(tss, sizeof(float),num * Const::tsLength,  f);
+        auto start = chrono::system_clock::now();
+        MAT1_READ_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        // statistic the size of each node fbl size, and allocate memory for them
+        for(long i=cur;i<cur+num;++i)
+            if(root->children[navids[i]]->size <= Const::th)
+                fbl[root->children[navids[i]]].size++;
+        for(auto &iter:fbl)
+            iter.second.buffer = new float [(long)iter.second.size * Const::tsLength];
+        end = chrono::system_clock::now();
+        MAT1_CPU_TIME_STAT += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        //copy series to node to ensure write is only called once upon a node fbl
+        for(long i = cur; i<cur+num;++i){
+            if(root->children[navids[i]]->size > Const::th) continue;
+            FBL_UNIT* fbl_node = &fbl[root->children[navids[i]]];
+            copy(tss + (i-cur) * Const::tsLength, tss + (i+1-cur)* Const::tsLength, fbl_node->buffer + (long)fbl_node->pos++ * Const::tsLength);
+        }
+        start = chrono::system_clock::now();
+        MAT1_CPU_TIME_COPY += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        start = chrono::system_clock::now();
+        // write series in order to node file from node fbl
+        for(auto & iter:fbl){
+            string outfile = index_dir ;
+            int id= iter.first->id;
+            assert(iter.first->size <= Const::th);
+            if(iter.first->partition_id != -1)
+                outfile += to_string(iter.first->layer) + "_" + to_string(iter.first->partition_id);
+            else
+                outfile += to_string(iter.first->layer) + "_" + to_string(iter.first->id) + "_L";
+            FILE *outf = fopen(outfile.c_str(), "a");
+
+            RAND_WRITE_CNT++;
+            SEQ_WRITE_CNT += iter.second.size;
+//            long bytes = iter.second.size * Const::tsLengthBytes;
+//            if(bytes >= Const::small_file_threshold)  SMALL_FILES_BYTES_WRITE += bytes;
+
+            fwrite(iter.second.buffer, sizeof(float), iter.second.size * Const::tsLength, outf);
+            fclose(outf);
+            delete[]iter.second.buffer;
+        }
+        end = chrono::system_clock::now();
+        MAT1_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        rest-=num;
+        cur += num;
+        Const::logPrint("Now Materialize leaves in the 1st layer. Progress: " + to_string((double)cur / (double)total * 100) + "%");
+
+    }
+
+    fclose(f);
+    delete[]tss;
+    auto end_t = chrono::system_clock::now();
+    MAT1_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+}
+
+
+void materializaSAX(unordered_set<FADASNode*>&leaves){
+    for(auto & leave : leaves){
+        if(leave->layer == 1)   continue;
+        vector<unsigned short>&sax_buf = leave->sax_buffer;
+        FADASNode* node = leave;
+        string outfile = Const::fidxfn + node->getFileName() + "_sax";
+        if(node->partition_id == -1)    outfile += "_L";
+        FILE *outf = fopen(outfile.c_str(), "wb");
+        fwrite(sax_buf.data(), sizeof(unsigned short ), sax_buf.size(), outf);
+        fclose(outf);
+    }
+}
+
+struct node_dat_buf{
+    mutex *m{};
+    vector<float>*dat_buf{};
+
+    node_dat_buf(mutex *_m, vector<float>*buf): m(_m), dat_buf(buf) {;}
+    ~node_dat_buf(){delete m; delete dat_buf;}
+};
+
+void routingWork(unordered_map<FADASNode*, vector<float>>*lbl, const float *tss, unsigned num,
+                 unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root){
+    for(unsigned i = cur; i < cur + num; ++i){
+        if(root->children[navids[i]]->size <= Const::th) continue;
+        FADASNode* node = root->route(sax_tbl + i * Const::segmentNum);
+        copy(tss + (i - cur) * Const::tsLength, tss + (i - cur + 1) * Const::tsLength,
+             back_insert_iterator<vector<float>>((*lbl)[node]));
+    }
+}
+
+
+//todo: check this and test performance
+void routingWorkLock(SafeHashMap<FADASNode*, node_dat_buf*>*lbl, const float *tss, unsigned num,
+                 unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root, vector<node_dat_buf*>*new_bufs){
+    node_dat_buf *_;
+    for(unsigned i = cur; i < cur + num; ++i){
+        if(root->children[navids[i]]->size <= Const::th) continue;
+        FADASNode* node = root->route(sax_tbl + i * Const::segmentNum);
+        bool found = lbl->find(node, _);
+        if(found){
+            lock_guard<mutex> g(*(_->m));
+            copy(tss + (i - cur) * Const::tsLength, tss + (i - cur + 1) * Const::tsLength,
+                 back_insert_iterator<vector<float>>(*(_->dat_buf)));
+        }else{
+            auto new_one = new node_dat_buf(new mutex(), new vector<float>());
+            lbl->insert(node, new_one);
+            new_bufs->push_back(new_one);
+            {
+                lock_guard<mutex> g(*(new_one->m));
+                copy(tss + (i - cur) * Const::tsLength, tss + (i - cur + 1) * Const::tsLength,
+                     back_insert_iterator<vector<float>>(*(new_one->dat_buf)));
+            }
+        }
+    }
+}
+
+void coordinateWork(unordered_map<FADASNode*, vector<float>>*lbl,  const float *tss, unsigned num,
+                    unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root){
+    unsigned batch = num / (Const::thread_num);
+    vector<thread>workers;
+    auto start = chrono::system_clock::now();
+    vector<unordered_map<FADASNode*, vector<float>>>lbls(Const::thread_num - 1);
+    for(int i = 0 ; i < Const::thread_num - 1; ++i)
+        workers.emplace_back(routingWork, &lbls[i], tss + i * batch * Const::tsLength, batch, cur + i * batch, sax_tbl,
+                             navids, root);
+    routingWork(lbl, tss + (Const::thread_num - 1) * batch * Const::tsLength, num - (Const::thread_num - 1) * batch,
+                cur + (Const::thread_num - 1) * batch, sax_tbl, navids, root);
+    for(int i = 0; i < Const::thread_num - 1; ++i)
+        workers[i].join();
+    auto end = chrono::system_clock::now();
+    LB_SERIES_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+
+    for(int i = 0; i < Const::thread_num -1; ++i){
+        lbl->merge(lbls[i]);
+        for(auto &[node, vec]: lbls[i]){
+            unsigned prev_size = (*lbl)[node].size();
+            (*lbl)[node].resize(prev_size + vec.size());
+            move(vec.begin(), vec.end(), (*lbl)[node].begin() + prev_size);
+        }
+    }
+    start = chrono::system_clock::now();
+    HEAP_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+}
+
+void coordinateWorkLock(SafeHashMap<FADASNode*, node_dat_buf*>*lbl, const float *tss, unsigned num,
+                    unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root, vector<node_dat_buf*>*new_buf){
+    unsigned batch = num / (Const::thread_num);
+    vector<thread>workers;
+    vector<vector<node_dat_buf*>>new_bufs(Const::thread_num - 1);
+    auto start = chrono::system_clock::now();
+    for(int i = 0 ; i < Const::thread_num - 1; ++i)
+        workers.emplace_back(routingWorkLock, lbl, tss + i * batch * Const::tsLength, batch, cur + i * batch, sax_tbl,
+                             navids, root, &new_bufs[i]);
+    routingWorkLock(lbl, tss + (Const::thread_num - 1) * batch * Const::tsLength, num - (Const::thread_num - 1) * batch,
+                cur + (Const::thread_num - 1) * batch, sax_tbl, navids, root, new_buf);
+    for(int i = 0; i < Const::thread_num - 1; ++i)
+        workers[i].join();
+    for(int i = 0 ; i < Const::thread_num - 1; ++i)
+        copy(new_bufs[i].begin(), new_bufs[i].end(), back_insert_iterator<vector<node_dat_buf*>>(*new_buf));
+    auto end = chrono::system_clock::now();
+    LB_SERIES_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+}
+
+atomic<bool>buf_1_processed, buf_2_start, buf_2_finished, buf_1_finished;
+
+void routingWorkerInMaterialization(unordered_map<FADASNode*, vector<float>>*lbl1, const float *tss1, unsigned num,
+                                    unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root,
+                                    const float *tss2,unordered_map<FADASNode*, vector<float>>*lbl2, unsigned num2,
+                                    unsigned num3){
+    coordinateWork(lbl1, tss1, num, cur, sax_tbl, navids, root);
+    buf_1_processed = true;
+    cur += num;
+    while(!buf_2_start);
+    coordinateWork(lbl2, tss2, num2, cur, sax_tbl, navids, root);
+    cur += num2;
+    while(!buf_2_finished);
+    coordinateWork(lbl2, tss2 + num2 * Const::tsLength, num3, cur, sax_tbl, navids, root);
+}
+
+void routingWorkerInMaterializationSlowWrite(unordered_map<FADASNode*, vector<float>>*lbl1, const float *tss1, unsigned num,
+                                    unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root,
+                                    const float *tss2,unordered_map<FADASNode*, vector<float>>*lbl2, unsigned num2,
+                                    unsigned num3){
+    coordinateWork(lbl1, tss1, num, cur, sax_tbl, navids, root);
+    cur += num;
+    while(!buf_1_finished);
+    coordinateWork(lbl1, tss1 + num * Const::tsLength, num2, cur, sax_tbl, navids, root);
+    buf_1_processed = true;
+    cur += num2;
+    while(!buf_2_finished);
+    coordinateWork(lbl2, tss2, num3, cur, sax_tbl, navids, root);
+}
+
+void routingWork2(unordered_map<FADASNode*, vector<float>>*lbl, const float *tss, unsigned num,
+                 unsigned cur, unsigned short**sax_tbl, int *navids, FADASNode* root){
+    for(unsigned i = cur; i < cur + num; ++i){
+        if(root->children[navids[i]]->size <= Const::th) continue;
+        FADASNode* node = root->route(sax_tbl[i]);
+        copy(tss + (i - cur) * Const::tsLength, tss + (i - cur + 1) * Const::tsLength,
+             back_insert_iterator<vector<float>>((*lbl)[node]));
+    }
+}
+
+void coordinateWork2(unordered_map<FADASNode*, vector<float>>*lbl,  const float *tss, unsigned num,
+                    unsigned cur, unsigned short**sax_tbl, int *navids, FADASNode* root){
+    int worker_num = min(1, Const::thread_num);
+    unsigned batch = num / (worker_num);
+    vector<thread>workers;
+    auto start = chrono::system_clock::now();
+    vector<unordered_map<FADASNode*, vector<float>>>lbls(worker_num - 1);
+    for(int i = 0 ; i < worker_num - 1; ++i)
+        workers.emplace_back(routingWork2, &lbls[i], tss + i * batch * Const::tsLength, batch, cur + i * batch, sax_tbl,
+                             navids, root);
+    routingWork2(lbl, tss + (worker_num - 1) * batch * Const::tsLength, num - (worker_num - 1) * batch,
+                cur + (worker_num - 1) * batch, sax_tbl, navids, root);
+    for(int i = 0; i < worker_num - 1; ++i)
+        workers[i].join();
+    auto end = chrono::system_clock::now();
+    LB_SERIES_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+
+    for(int i = 0; i < worker_num -1; ++i){
+        lbl->merge(lbls[i]);
+        for(auto &[node, vec]: lbls[i]){
+            unsigned prev_size = (*lbl)[node].size();
+            (*lbl)[node].resize(prev_size + vec.size());
+            move(vec.begin(), vec.end(), (*lbl)[node].begin() + prev_size);
+        }
+    }
+    start = chrono::system_clock::now();
+    HEAP_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+}
+
+void routingWorkerInMaterializationSlowWrite2(unordered_map<FADASNode*, vector<float>>*lbl1, const float *tss1, unsigned num,
+                                             unsigned cur, unsigned short**sax_tbl, int *navids, FADASNode* root,
+                                             const float *tss2,unordered_map<FADASNode*, vector<float>>*lbl2, unsigned num2,
+                                             unsigned num3){
+    coordinateWork2(lbl1, tss1, num, cur, sax_tbl, navids, root);
+    cur += num;
+    while(!buf_1_finished);
+    coordinateWork2(lbl1, tss1 + num * Const::tsLength, num2, cur, sax_tbl, navids, root);
+    buf_1_processed = true;
+    cur += num2;
+    while(!buf_2_finished);
+    coordinateWork2(lbl2, tss2, num3, cur, sax_tbl, navids, root);
+}
+
+
+void routingWorkerInMaterializationSlowWrite3(unordered_map<FADASNode*, vector<float>>*lbl1, const float *tss1, unsigned num,
+                                              unsigned cur, unsigned short**sax_tbl, int *navids, FADASNode* root,
+                                              const float *tss2,unordered_map<FADASNode*, vector<float>>*lbl2, unsigned num2){
+    auto start = chrono::system_clock::now();
+    coordinateWork2(lbl1, tss1, num, cur, sax_tbl, navids, root);
+    cur += num;
+    buf_1_processed = true;
+    while(!buf_2_finished);
+    coordinateWork2(lbl2, tss2, num2, cur, sax_tbl, navids, root);
+    auto end = chrono::system_clock::now();
+    MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+}
+
+void routingWorkerInMaterializationSlowWriteLock(SafeHashMap<FADASNode*, node_dat_buf*>*lbl1, const float *tss1, unsigned num,
+                                             unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root,
+                                             const float *tss2, SafeHashMap<FADASNode*, node_dat_buf*>*lbl2, unsigned num2,
+                                             unsigned num3, vector<node_dat_buf*>*new_buf){
+    coordinateWorkLock(lbl1, tss1, num, cur, sax_tbl, navids, root, new_buf);
+    cur += num;
+    while(!buf_1_finished);
+    coordinateWorkLock(lbl1, tss1 + num * Const::tsLength, num2, cur, sax_tbl, navids, root, new_buf);
+    buf_1_processed = true;
+    cur += num2;
+    while(!buf_2_finished);
+    coordinateWorkLock(lbl2, tss2, num3, cur, sax_tbl, navids, root, new_buf);
+}
+
+
+//void routingWorkParWrite(unordered_map<FADASNode*, vector<float>>*lbl, const float *tss, unsigned num,
+//                 unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root){
+//    for(unsigned i = cur; i < cur + num; ++i){
+//        if(root->children[navids[i]]->size <= Const::th) continue;
+//        FADASNode* node = root->route(sax_tbl + i * Const::segmentNum);
+//        copy(tss + (i - cur) * Const::tsLength, tss + (i - cur + 1) * Const::tsLength,
+//             back_insert_iterator<vector<float>>((*lbl)[node]));
+//    }
+//}
+//void coordinateWorkParWrite(vector<unordered_map<FADASNode*, vector<float>>>*lbls,  const float *tss, unsigned num,
+//                    unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root){
+//    unsigned batch = num / (Const::thread_num);
+//    vector<thread>workers;
+//    auto start = chrono::system_clock::now();
+//    for(int i = 0 ; i < Const::thread_num - 1; ++i)
+//        workers.emplace_back(routingWorkParWrite, &((*lbls)[i+1]), tss + i * batch * Const::tsLength, batch, cur + i * batch, sax_tbl,
+//                             navids, root);
+//    routingWork(&((*lbls)[0]), tss + (Const::thread_num - 1) * batch * Const::tsLength, num - (Const::thread_num - 1) * batch,
+//                cur + (Const::thread_num - 1) * batch, sax_tbl, navids, root);
+//    for(int i = 0; i < Const::thread_num - 1; ++i)
+//        workers[i].join();
+//    auto end = chrono::system_clock::now();
+//    LB_SERIES_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//}
+//void routingWorkerInMaterializationSlowWriteParWrite(vector<unordered_map<FADASNode*, vector<float>>>*lbls1, const float *tss1, unsigned num,
+//                                             unsigned cur, unsigned short*sax_tbl, int *navids, FADASNode* root,
+//                                             const float *tss2,unordered_map<FADASNode*, vector<float>>*lbl2, unsigned num2,
+//                                             unsigned num3){
+//    coordinateWorkParWrite(lbl1, tss1, num, cur, sax_tbl, navids, root);
+//    cur += num;
+//    while(!buf_1_finished);
+//    coordinateWork(lbl1, tss1 + num * Const::tsLength, num2, cur, sax_tbl, navids, root);
+//    buf_1_processed = true;
+//    cur += num2;
+//    while(!buf_2_finished);
+//    coordinateWork(lbl2, tss2, num3, cur, sax_tbl, navids, root);
+//}
+
+// When read is slower than write
+void materializeAllLeavesParallel(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+    auto start_t = chrono::system_clock::now(), start = chrono::system_clock::now(), end = chrono::system_clock::now();
+    Const::logPrint("Start move data to disk file in the deep layers.");
+    FILE *f = fopen(datafn.c_str(), "r");
+    unsigned rest = root->size, total = root->size, cur = 0;
+    unordered_map<FADASNode*, vector<float>>lbl1,lbl2;
+    unsigned buf_num = Const::fbl_series_num / 2;
+    unsigned num1, num2;
+    auto tss1 = new float [buf_num * Const::tsLength];
+    auto tss2 = new float [buf_num * Const::tsLength];
+    thread* routing_worker;
+
+    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+    // This may incur many write calls.
+    while(rest > 0){
+        lbl1.clear(); lbl2.clear();
+        buf_1_processed = false; buf_2_start = false; buf_2_finished = false;
+        num1 = rest > buf_num ? buf_num : rest;
+        start = chrono::system_clock::now();
+        fread(tss1, sizeof(float),num1 * Const::tsLength,  f);
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        rest -= num1;
+        num2 = rest > buf_num ? buf_num : rest;
+        unsigned num2_1 = num2 * 0.6;
+        routing_worker = new thread(routingWorkerInMaterialization, &lbl1, tss1, num1, cur, sax_tbl, navids, root,
+                                    tss2, &lbl2, num2_1, num2 - num2_1);
+
+        cur += num1;
+        start = chrono::system_clock::now();
+        fread(tss2, sizeof(float),num2_1 * Const::tsLength,  f);
+        buf_2_start = true;
+        fread(tss2 + num2_1 * Const::tsLength, sizeof(float), (num2 - num2_1) * Const::tsLength, f);
+        buf_2_finished = true;
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+//        routing_worker->join();
+        while(!buf_1_processed) ;
+        start = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        WAIT_TIME_1 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        rest -= num2;
+        cur += num2;
+
+        start = chrono::system_clock::now();
+        for(auto &[node, data_buf] : lbl1){
+            string outfile = Const::fidxfn + node->getFileName();
+            if(node->partition_id == -1)  outfile += "_L";
+            FILE *outf = fopen(outfile.c_str(), "a");
+            RAND_WRITE_CNT++;
+            fwrite(data_buf.data(), sizeof(float ), data_buf.size(), outf);
+            fclose(outf);
+        }
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        routing_worker->join();
+        start = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        WAIT_TIME_2 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        for(auto &[node, data_buf] : lbl2){
+            string outfile = Const::fidxfn + node->getFileName();
+            if(node->partition_id == -1)  outfile += "_L";
+            FILE *outf = fopen(outfile.c_str(), "a");
+            RAND_WRITE_CNT++;
+            fwrite(data_buf.data(), sizeof(float ), data_buf.size(), outf);
+            fclose(outf);
+        }
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        Const::logPrint("Now Materialize all leaves below the 1st layer. Progress: " + to_string((double)cur / (double)total * 100) + "%");
+    }
+
+    fclose(f);
+    delete[] navids;
+    auto end_t = chrono::system_clock::now();
+    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+}
+
+// When write is slower than read
+void materializeAllLeavesParallelSlowWrite(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+    auto start_t = chrono::system_clock::now(), start = chrono::system_clock::now(), end = chrono::system_clock::now();
+    Const::logPrint("Start move data to disk file in the deep layers.");
+    FILE *f = fopen(datafn.c_str(), "r");
+    unsigned rest = root->size, total = root->size, cur = 0;
+    unordered_map<FADASNode*, vector<float>>lbl1,lbl2;
+    unsigned buf_num = Const::fbl_series_num / 2;
+    unsigned num1, num2;
+    auto tss1 = new float [buf_num * Const::tsLength];
+    auto tss2 = new float [buf_num * Const::tsLength];
+    thread* routing_worker;
+
+    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+    // This may incur many write calls.
+    while(rest > 0){
+        lbl1.clear(); lbl2.clear();
+        buf_1_processed = false; buf_2_finished = false; buf_1_finished = false;
+        num1 = rest > buf_num ? buf_num : rest;
+        unsigned num1_1 = num1 * 0.5;
+        rest -= num1;
+        num2 = rest > buf_num ? buf_num : rest;
+        start = chrono::system_clock::now();
+        fread(tss1, sizeof(float),num1_1 * Const::tsLength,  f);
+        routing_worker = new thread(routingWorkerInMaterializationSlowWrite, &lbl1, tss1, num1_1, cur, sax_tbl, navids, root,
+                                    tss2, &lbl2, num1 - num1_1, num2);
+        fread(tss1 + num1_1 * Const::tsLength, sizeof(float), (num1 - num1_1) * Const::tsLength, f);
+        buf_1_finished = true;
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        cur += num1;
+        start = chrono::system_clock::now();
+        fread(tss2, sizeof(float),num2 * Const::tsLength,  f);
+        buf_2_finished = true;
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        while(!buf_1_processed) ;
+        start = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        WAIT_TIME_1 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        rest -= num2;
+        cur += num2;
+
+        start = chrono::system_clock::now();
+        for(auto &[node, data_buf] : lbl1){
+            string outfile = Const::fidxfn + node->getFileName();
+            if(node->partition_id == -1)  outfile += "_L";
+            FILE *outf = fopen(outfile.c_str(), "a");
+            RAND_WRITE_CNT++;
+            fwrite(data_buf.data(), sizeof(float ), data_buf.size(), outf);
+            fclose(outf);
+        }
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        routing_worker->join();
+        start = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        WAIT_TIME_2 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        for(auto &[node, data_buf] : lbl2){
+            string outfile = Const::fidxfn + node->getFileName();
+            if(node->partition_id == -1)  outfile += "_L";
+            FILE *outf = fopen(outfile.c_str(), "a");
+            RAND_WRITE_CNT++;
+            fwrite(data_buf.data(), sizeof(float ), data_buf.size(), outf);
+            fclose(outf);
+        }
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        Const::logPrint("Now Materialize all leaves below the 1st layer. Progress: " + to_string((double)cur / (double)total * 100) + "%");
+    }
+
+    fclose(f);
+    delete[] navids;
+    auto end_t = chrono::system_clock::now();
+    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+}
+
+atomic<int>cur;
+void writeWorker(unordered_map<FADASNode*, vector<float>>* lbl, vector<FADASNode*>*nodes, int size){
+    FADASNode* node;
+    FILE* outf;
+    string outfile;
+    while(true){
+        int i = cur.fetch_add(1);
+        if(i >= size)   break;
+        node = (*nodes)[i];
+        vector<float>&dat_buf = (*lbl)[node];
+
+        outfile = Const::fidxfn + node->getFileName();
+        if(node->partition_id == -1)  outfile += "_L";
+        outf = fopen(outfile.c_str(), "a");
+        RAND_WRITE_CNT++;
+        fwrite(dat_buf.data(), sizeof(float ), dat_buf.size(), outf);
+        fclose(outf);
+    }
+}
+
+//void writeWorkerLock(unordered_map<FADASNode*, node_dat_buf*>* lbl, vector<FADASNode*>*nodes, int size){
+//    FADASNode* node;
+//    FILE* outf;
+//    string outfile;
+//    while(true){
+//        int i = cur.fetch_add(1);
+//        if(i >= size)   break;
+//        node = (*nodes)[i];
+//        outfile = Const::fidxfn + node->getFileName();
+//        if(node->partition_id == -1)  outfile += "_L";
+//
+//        auto& dat_buf = (*lbl)[node];
+//        RAND_WRITE_CNT++;
+//
+//        {
+//            lock_guard<mutex> g(dat_buf->m);
+//            outf = fopen(outfile.c_str(), "a");
+//            fwrite(dat_buf->dat_buf->data(), sizeof(float), dat_buf->dat_buf->size(), outf);
+//            fclose(outf);
+//        }
+//    }
+//}
+
+void coordinateWriteWork(unordered_map<FADASNode*, vector<float>>& lbl){
+    vector<FADASNode*>nodes;
+    nodes.reserve(lbl.size());
+    for(auto &[node, _] : lbl)
+        nodes.push_back(node);
+    cur = 0;
+    vector<thread>threads;
+    for(int i = 0; i < Const::thread_num - 1; ++i)
+        threads.emplace_back(writeWorker, &lbl, &nodes, lbl.size());
+    writeWorker(&lbl, &nodes, lbl.size());
+    for(int i = 0; i < Const::thread_num - 1; ++i)
+        threads[i].join();
+}
+
+//void coordinateWriteWorkLock(unordered_map<FADASNode*, node_dat_buf*>& lbl){
+//    vector<FADASNode*>nodes;
+//    nodes.reserve(lbl.size());
+//    for(auto &[node, _] : lbl)
+//        nodes.push_back(node);
+//    cur = 0;
+//    vector<thread>threads;
+//    for(int i = 0; i < Const::thread_num - 1; ++i)
+//        threads.emplace_back(writeWorkerLock, &lbl, &nodes, lbl.size());
+//    writeWorkerLock(&lbl, &nodes, lbl.size());
+//    for(int i = 0; i < Const::thread_num - 1; ++i)
+//        threads[i].join();
+//}
+
+void materializeAllLeavesParallelSlowWriteParWrite(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+    auto start_t = chrono::system_clock::now(), start = chrono::system_clock::now(), end = chrono::system_clock::now();
+    Const::logPrint("Start move data to disk file in the deep layers.");
+    FILE *f = fopen(datafn.c_str(), "r");
+    unsigned rest = root->size, total = root->size, cur = 0;
+    unordered_map<FADASNode*, vector<float>>lbl1,lbl2;
+    unsigned buf_num = Const::fbl_series_num / 2;
+    unsigned num1, num2;
+    auto tss1 = new float [buf_num * Const::tsLength];
+    auto tss2 = new float [buf_num * Const::tsLength];
+    thread* routing_worker;
+
+    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+    // This may incur many write calls.
+    while(rest > 0){
+        lbl1.clear(); lbl2.clear();
+        buf_1_processed = false; buf_2_finished = false; buf_1_finished = false;
+        num1 = rest > buf_num ? buf_num : rest;
+        unsigned num1_1 = num1 * 0.5;
+        rest -= num1;
+        num2 = rest > buf_num ? buf_num : rest;
+        start = chrono::system_clock::now();
+        fread(tss1, sizeof(float),num1_1 * Const::tsLength,  f);
+        routing_worker = new thread(routingWorkerInMaterializationSlowWrite, &lbl1, tss1, num1_1, cur, sax_tbl, navids, root,
+                                    tss2, &lbl2, num1 - num1_1, num2);
+        fread(tss1 + num1_1 * Const::tsLength, sizeof(float), (num1 - num1_1) * Const::tsLength, f);
+        buf_1_finished = true;
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        cur += num1;
+        start = chrono::system_clock::now();
+        fread(tss2, sizeof(float),num2 * Const::tsLength,  f);
+        buf_2_finished = true;
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        while(!buf_1_processed) ;
+        start = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        WAIT_TIME_1 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        rest -= num2;
+        cur += num2;
+
+        start = chrono::system_clock::now();
+        coordinateWriteWork(lbl1);
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        routing_worker->join();
+        start = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        WAIT_TIME_2 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        coordinateWriteWork(lbl2);
+
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        Const::logPrint("Now Materialize all leaves in the deep layers. Progress: " +
+            to_string((double)cur / (double)total * 100) + "%");
+    }
+
+    fclose(f);
+    delete[] navids;
+    auto end_t = chrono::system_clock::now();
+    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+}
+
+void materializeAllLeavesParallelSlowWriteParWrite2(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short**sax_tbl){
+    auto start_t = chrono::system_clock::now(), start = chrono::system_clock::now(), end = chrono::system_clock::now();
+    Const::logPrint("Start move data to disk file in the deep layers.");
+    FILE *f = fopen(datafn.c_str(), "r");
+    unsigned rest = root->size, total = root->size, cur = 0;
+    unordered_map<FADASNode*, vector<float>>lbl1,lbl2;
+    unsigned buf_num[2];
+    buf_num[0] = Const::fbl_series_num * 0.35; buf_num[1] = Const::fbl_series_num - buf_num[0];
+    unsigned num1, num2;
+    auto tss1 = new float [buf_num[0] * Const::tsLength];
+    auto tss2 = new float [buf_num[1] * Const::tsLength];
+    thread* routing_worker;
+
+    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+    // This may incur many write calls.
+    while(rest > 0){
+        lbl1.clear(); lbl2.clear();
+        buf_1_processed = false; buf_2_finished = false;
+        num1 = rest > buf_num[0] ? buf_num[0] : rest;
+        rest -= num1;
+        num2 = rest > buf_num[1] ? buf_num[1] : rest;
+        start = chrono::system_clock::now();
+        fread(tss1, sizeof(float),num1 * Const::tsLength,  f);
+        routing_worker = new thread(routingWorkerInMaterializationSlowWrite3, &lbl1, tss1, num1, cur, sax_tbl, navids, root,
+                                    tss2, &lbl2, num2);
+        fread(tss2, sizeof(float), num2 * Const::tsLength, f);
+        end = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        cur += num1;
+        buf_2_finished = true;
+
+        while(!buf_1_processed) ;
+        start = chrono::system_clock::now();
+        WAIT_TIME_1 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        rest -= num2;
+        cur += num2;
+
+        start = chrono::system_clock::now();
+        coordinateWriteWork(lbl1);
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        routing_worker->join();
+        start = chrono::system_clock::now();
+        WAIT_TIME_2 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        coordinateWriteWork(lbl2);
+
+        end = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        Const::logPrint("Now Materialize all leaves in the deep layers. Progress: " +
+                        to_string((double)cur / (double)total * 100) + "%");
+    }
+
+    fclose(f);
+    delete[] navids;
+    auto end_t = chrono::system_clock::now();
+    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+}
+
+
+//void materializeAllLeavesParallelSlowWriteParWriteLock(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+//    auto start_t = chrono::system_clock::now(), start = chrono::system_clock::now(), end = chrono::system_clock::now();
+//    Const::logPrint("Start move data to disk file in the deep layers.");
+//    FILE *f = fopen(datafn.c_str(), "r");
+//    unsigned rest = root->size, total = root->size, cur = 0;
+//    SafeHashMap<FADASNode*, node_dat_buf*>lbl1,lbl2;
+//    unsigned buf_num = Const::fbl_series_num / 2;
+//    unsigned num1, num2;
+//    auto tss1 = new float [buf_num * Const::tsLength];
+//    auto tss2 = new float [buf_num * Const::tsLength];
+//    thread* routing_worker;
+//    vector<node_dat_buf*>new_buf;
+//
+//    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+//    // This may incur many write calls.
+//    while(rest > 0){
+//        for(auto*_:new_buf) delete _;
+//        lbl1.clear(); lbl2.clear();
+//        buf_1_processed = false; buf_2_finished = false; buf_1_finished = false;
+//        num1 = rest > buf_num ? buf_num : rest;
+//        unsigned num1_1 = num1 * 0.5;
+//        rest -= num1;
+//        num2 = rest > buf_num ? buf_num : rest;
+//        start = chrono::system_clock::now();
+//        fread(tss1, sizeof(float),num1_1 * Const::tsLength,  f);
+//        routing_worker = new thread(routingWorkerInMaterializationSlowWriteLock, &lbl1, tss1, num1_1, cur, sax_tbl, navids, root,
+//                                    tss2, &lbl2, num1 - num1_1, num2, &new_buf);
+//        fread(tss1 + num1_1 * Const::tsLength, sizeof(float), (num1 - num1_1) * Const::tsLength, f);
+//        buf_1_finished = true;
+//        end = chrono::system_clock::now();
+//        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//        cur += num1;
+//        start = chrono::system_clock::now();
+//        fread(tss2, sizeof(float),num2 * Const::tsLength,  f);
+//        buf_2_finished = true;
+//        end = chrono::system_clock::now();
+//        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//        while(!buf_1_processed) ;
+//        start = chrono::system_clock::now();
+//        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+//        WAIT_TIME_1 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+//
+//        rest -= num2;
+//        cur += num2;
+//
+//        start = chrono::system_clock::now();
+//        coordinateWriteWorkLock(lbl1);
+//        end = chrono::system_clock::now();
+//        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//        routing_worker->join();
+//        start = chrono::system_clock::now();
+//        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+//        WAIT_TIME_2 += chrono::duration_cast<chrono::microseconds>(start - end).count();
+//
+//        coordinateWriteWorkLock(lbl2);
+//
+//        end = chrono::system_clock::now();
+//        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//        Const::logPrint("Now Materialize all leaves below the 1st layer. Progress: " +
+//                        to_string((double)cur / (double)total * 100) + "%");
+//    }
+//
+//    fclose(f);
+//    delete[] navids;
+//    auto end_t = chrono::system_clock::now();
+//    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+//}
+
+
+//void materializeAllLeavesParallelTest(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+//    auto start_t = chrono::system_clock::now(), start = chrono::system_clock::now(), end = chrono::system_clock::now();
+//    Const::logPrint("Start move data to disk file in the deep layers.");
+//    FILE *f = fopen(datafn.c_str(), "r");
+//    unsigned rest = root->size, total = root->size, cur = 0;
+//    unordered_map<FADASNode*, vector<float>>lbl1,lbl2;
+//    unsigned buf_num = Const::fbl_series_num / 2;
+//    unsigned num1, num2;
+//    auto tss1 = new float [buf_num * Const::tsLength];
+//    auto tss2 = new float [buf_num * Const::tsLength];
+//    thread* routing_worker;
+//
+//    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+//    // This may incur many write calls.
+//    while(rest > 0){
+//        lbl1.clear(); lbl2.clear();
+//        num1 = rest > buf_num ? buf_num : rest;
+//        start = chrono::system_clock::now();
+//        fread(tss1, sizeof(float),num1 * Const::tsLength,  f);
+//        end = chrono::system_clock::now();
+//        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//        routing_worker = new thread(routingWorkerInMaterialization, &lbl1, tss1, num1, cur, sax_tbl, navids, root);
+//        routing_worker->join();
+//        start = chrono::system_clock::now();
+//        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+//
+//        rest -= num1;
+//        cur += num1;
+//
+//        num2 = rest > buf_num ? buf_num : rest;
+//        start = chrono::system_clock::now();
+//        fread(tss2, sizeof(float),num2 * Const::tsLength,  f);
+//        end = chrono::system_clock::now();
+//        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//
+//        routing_worker = new thread(routingWorkerInMaterialization, &lbl2, tss2, num2, cur, sax_tbl, navids, root);
+//        routing_worker->join();
+//        start = chrono::system_clock::now();
+//        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+//
+//        rest -= num2;
+//        cur += num2;
+//
+//        start = chrono::system_clock::now();
+//        for(auto &[node, data_buf] : lbl1){
+//            string outfile = Const::fidxfn + node->getFileName();
+//            if(node->partition_id == -1)  outfile += "_L";
+//            FILE *outf = fopen(outfile.c_str(), "a");
+//            RAND_WRITE_CNT++;
+//            fwrite(data_buf.data(), sizeof(float ), data_buf.size(), outf);
+//            fclose(outf);
+//        }
+//        end = chrono::system_clock::now();
+//        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//
+//        start = chrono::system_clock::now();
+//        for(auto &[node, data_buf] : lbl2){
+//            string outfile = Const::fidxfn + node->getFileName();
+//            if(node->partition_id == -1)  outfile += "_L";
+//            FILE *outf = fopen(outfile.c_str(), "a");
+//            RAND_WRITE_CNT++;
+//            fwrite(data_buf.data(), sizeof(float ), data_buf.size(), outf);
+//            fclose(outf);
+//        }
+//        end = chrono::system_clock::now();
+//        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+//
+//        Const::logPrint("Now Materialize all leaves below the 1st layer. Progress: " + to_string((double)cur / (double)total * 100) + "%");
+//    }
+//
+//    fclose(f);
+//    delete[] navids;
+//    auto end_t = chrono::system_clock::now();
+//    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+//}
+//
+
+void materializeDeepLeavesWithSax(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
     auto start_sax = chrono::system_clock::now();
     Const::logPrint("Start move sax to disk file in 1st layer.");
 
@@ -1018,6 +1904,84 @@ void materializeAllLeavesWithSax(string datafn, FADASNode* root, int *navids, st
     auto end_t = chrono::system_clock::now();
     MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
 }
+
+void materializeAllLeavesWithSax(string datafn, FADASNode* root, int *navids, string index_dir, unsigned short*sax_tbl){
+    auto start_sax = chrono::system_clock::now();
+    Const::logPrint("Start move sax to disk file in 1st layer.");
+
+    unordered_map<FADASNode*, vector<unsigned short *>>sax_buffer;
+    for(int i=0;i<root->size;++i){
+        auto * sax = sax_tbl + i * Const::segmentNum;
+        FADASNode* node = root->route(sax);
+        sax_buffer[node].push_back(sax);
+    }
+    for(auto &[node, buffer]:sax_buffer){
+        string outfile = Const::fidxfn + node->getFileName() + "_sax";
+        if(node->partition_id == -1)    outfile += "_L";
+        FILE *outf = fopen(outfile.c_str(), "a");
+        for(auto sax:buffer)
+            fwrite(sax, sizeof(unsigned short ), Const::segmentNum, outf);
+        fclose(outf);
+    }
+    sax_buffer.clear();
+    auto end_sax = chrono::system_clock::now();
+    SAX_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(end_sax - start_sax).count();
+
+    auto start_t = chrono::system_clock::now();
+    Const::logPrint("Start move data to disk file in 1st layer.");
+    FILE *f = fopen(datafn.c_str(), "r");
+    long rest = root->size, total = root->size, cur = 0;
+    unordered_map<FADASNode*, LBL_UNIT>lbl;
+
+    // There is another implementation method that fbl in each node stores a pointer vector where each pointer points to a series.
+    // This may incur many write calls.
+    while(rest > 0){
+        lbl.clear();
+        long num;
+        if(rest > Const::fbl_series_num)    num = Const::fbl_series_num;
+        else num = rest;
+        auto *tss = new float[num * Const::tsLength];
+
+        auto end = chrono::system_clock::now();
+        fread(tss, sizeof(float),num * Const::tsLength,  f);
+        auto start = chrono::system_clock::now();
+        MAT2_READ_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+        //copy series to node to ensure write is only called once upon a node fbl
+        for(long i = cur; i<cur+num;++i){
+            FADASNode* node = root->route(sax_tbl + i * Const::segmentNum);
+            lbl[node].buffer.push_back(tss + (i-cur) * Const::tsLength);
+        }
+        end = chrono::system_clock::now();
+        MAT2_CPU_TIME += chrono::duration_cast<chrono::microseconds>(end-start).count();
+
+        // write series in order to node file from node fbl
+        for(auto & [node,lbl_unit]:lbl){
+            string outfile = Const::fidxfn + node->getFileName();
+            if(node->partition_id == -1)  outfile += "_L";
+            FILE *outf = fopen(outfile.c_str(), "a");
+
+            RAND_WRITE_CNT++;
+            for(float *dat:lbl_unit.buffer)
+                fwrite(dat, sizeof(float), Const::tsLength, outf);
+            fclose(outf);
+        }
+        start = chrono::system_clock::now();
+        MAT2_WRITE_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+        delete[] tss;
+
+        rest-=num;
+        cur += num;
+        Const::logPrint("Now Materialize all leaves. Progress: " + to_string((double)cur / (double)total * 100) + "%");
+
+    }
+
+    fclose(f);
+    delete[] navids;
+    auto end_t = chrono::system_clock::now();
+    MAT2_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(end_t - start_t).count();
+}
+
 
 // put actual series into disk file of nodes in 1st layer
 void materialize1stLayerLessPack(string datafn, FADASNode* root, int *navids, string index_dir){
@@ -1621,10 +2585,6 @@ FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
 //    int partNum = partition1stLayer(nodeIn1stLayer, g, Const::filling_factor_1st);
     int partNum = partitionNew(nodeIn1stLayer, Const::segmentNum);
     Const::logPrint("Finish partition");
-    // build rest data node if any
-//    for(auto &node:nodeIn1stLayer)
-//        if(node.size <= Const::th && node.pid == -1)
-//            node.pid = partNum++;
 
     FADASNode* childrenList[partNum];
     for(int i=0;i<partNum;++i)  childrenList[i] = new FADASNode(1, i);
@@ -1660,7 +2620,6 @@ FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
     end = chrono::system_clock::now();
     GROW_CPU_TIME_1st += chrono::duration_cast<chrono::microseconds>(end - start).count();
 
-    thread IO(materialize1stLayerWithSaxOnlyLeaf, datafn, root, navids, Const::fidxfn, saxes);
 
     int j = 0;
     int milestone = 0.1 * Const::vertexNum;
@@ -1676,13 +2635,10 @@ FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
     GROW_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
 
     Const::logPrint("build index skeleton finished.");
-
-    IO.join();
-    Const::logPrint("Start materialize internal nodes in the 1st layer");
+//    thread IO(materialize1stLayerWithSaxOnlyLeaf, datafn, root, navids, Const::fidxfn, saxes);
+//    IO.join();
+    Const::logPrint("Start materialize leaves");
     materializeAllLeavesWithSax(datafn, root, navids, Const::fidxfn, saxes);
-//    for(int i=0;i<Const::vertexNum;++i)
-//        if(nodeIn1stLayer[i].size > Const::th)
-//            materializeInterNodeWithSax(root->children[i], saxes);
     Const::logPrint("build index successfully!");
     delete[] saxes;
     auto end_t = chrono::system_clock::now();
@@ -1718,6 +2674,185 @@ FADASNode *FADASNode::BuildIndex(string &datafn, string &saxfn) {
     cout << "Output needs" << output_time << " mins" <<endl
     <<"Input needs" << input_time << " mins"<<endl
     <<"CPU needs" << cpu_time << "mins"<<endl;
+
+    root->getIndexStats();
+
+    return root;
+}
+
+static atomic<int> cur_subtree;
+
+void growSubtreeWorker(FADASNode* root, int end){
+    int cur_id;
+    while(true){
+        cur_id = cur_subtree.fetch_add(1);
+        if(cur_id > end)    return;
+        if(root->children[cur_id] == nullptr || root->children[cur_id]->size <= Const::th)  continue;
+        root->children[cur_id]->growIndexParallel();
+    }
+}
+
+void get_all_leaves(FADASNode*root, unordered_set<FADASNode*>&node_set){
+    int child_num = 1<< (root->chosenSegments.size());
+    for(int i = 0; i < child_num; ++i ){
+        if(root->children[i] == nullptr)    continue;
+        if(root->children[i]->size <= Const::th)    node_set.insert(root->children[i]);
+        else get_all_leaves(root->children[i], node_set);
+    }
+}
+
+FADASNode *FADASNode::BuildIndexParallel(string &datafn, string &saxfn) {
+    Const::logPrint("Start building index.");
+    auto start_t = chrono::system_clock::now();
+    loadCombines();
+    FileUtil::checkDirClean(Const::fidxfn.c_str());
+    auto end = chrono::system_clock::now();
+    long series_num = generateSaxTblParallel2();
+//    long series_num = loadSax2(saxfn);
+
+    auto start = chrono::system_clock::now();
+    Const::logPrint("Finish building sax table.");
+    SAX_PAA_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+    cout << "Building sax and paa total time is "<<SAX_PAA_TOTAL_TIME / 1000 <<"ms, cpu time is "
+         << SAX_PAA_CPU_TIME / 1000 <<"ms, I/O read time is " << SAX_PAA_READ_TIME / 1000 << "ms."<<endl;
+
+
+    auto* root = new FADASNode();
+    root->size = series_num;
+    for(int &i:root->bits_cardinality)  i=0;
+    for(int i=0;i<Const::segmentNum;++i)    root->chosenSegments.push_back(i);
+    vector<partUnit> nodeIn1stLayer(Const::vertexNum);
+    int *navids = new int[series_num];
+    for(int i=0;i<Const::vertexNum;++i)
+        nodeIn1stLayer[i].id = i, nodeIn1stLayer[i].size=0, nodeIn1stLayer[i].pid = -1;
+
+    // get 1st layer node size
+    for(long i=0;i<series_num;++i){
+//        unsigned short *asax = saxes + i * Const::segmentNum;
+        auto asax = sax_tbl[i];
+        int nav_id = SaxUtil::invSaxHeadFromSax(asax, Const::bitsCardinality, Const::segmentNum);
+        navids[i] = nav_id;
+        nodeIn1stLayer[nav_id].size++;
+    }
+
+    Const::logPrint("Finish statistic size of nodes in the 1st layer.");
+
+    // partition 1st layer
+    int partNum = partitionNew(nodeIn1stLayer, Const::segmentNum);
+    Const::logPrint("Finish partition");
+
+    FADASNode* childrenList[partNum];
+    for(int i=0;i<partNum;++i)  childrenList[i] = new FADASNode(1, i);
+    root->children.resize(Const::vertexNum);
+    for(int i=0;i<Const::vertexNum;++i){
+        if(nodeIn1stLayer[i].size <= 0) continue;
+        if(nodeIn1stLayer[i].size > Const::th) {    // internal node
+            root->children[i] = new FADASNode(1, nodeIn1stLayer[i].size, i);
+            root->children[i]->generateSaxAndCardIn1stLayer(i);
+        }else if(nodeIn1stLayer[i].pid == -1){  // leaf node
+            root->children[i] = new FADASNode(1, nodeIn1stLayer[i].size, i);
+            root->children[i]->generateSaxAndCardIn1stLayer(i);
+        }
+        else{   // leaf pack
+            int pid = nodeIn1stLayer[i].pid;
+            root->children[i] = childrenList[pid];
+            childrenList[pid]->size += nodeIn1stLayer[i].size;
+            childrenList[pid]->generateSaxAndCardIn1stLayer4LeafNode(i);
+        }
+    }
+    Const::logPrint("Finish build index structure 1st layer.");
+
+    // put data offsets to internal nodes in 1st layer
+    for(int i=0;i<Const::vertexNum;++i)
+        if(root->children[i]!= nullptr)
+            root->children[i]->offsets.reserve(nodeIn1stLayer[i].size);
+    for(int i=0;i<series_num;++i){
+        int nav_id = navids[i];
+        root->children[nav_id]->offsets.push_back(i);
+    }
+    Const::logPrint("data offsets have been put into nodes in the 1st layer.");
+    end = chrono::system_clock::now();
+    GROW_CPU_TIME_1st += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+    thread IO(materialize1stLayerWithSaxOnlyLeaf2, datafn, root, navids, Const::fidxfn, sax_tbl);
+
+    int th_num = Const::thread_num;
+    cur_subtree = 0;
+    vector<thread>thread_pool;
+    Const::logPrint("start to grow the index structure");
+    for(int i = 0 ; i < th_num; ++i)
+        thread_pool.emplace_back(thread(growSubtreeWorker, root, Const::vertexNum - 1));
+    int finished_num = 0;
+    vector<bool>finished_threads(th_num, false);
+    while (finished_num < th_num){
+        for(int i = 0; i < th_num;++i){
+            if(finished_threads[i]) continue;
+            if(thread_pool[i].joinable()){
+                thread_pool[i].join();
+                finished_threads[i] = true;
+                Const::logPrint("Thread " + to_string(i) + " has finished growing index");
+                finished_num++;
+            }
+        }
+    }
+    start = chrono::system_clock::now();
+    GROW_TOTAL_TIME += chrono::duration_cast<chrono::microseconds>(start - end).count();
+
+    unordered_set<FADASNode*>node_set;
+    get_all_leaves(root,node_set);
+    Const::logPrint("totally " + to_string(node_set.size()) + " leaves.");
+    Const::logPrint("build index skeleton finished.");
+
+    IO.join();
+    cout << "During the process of materializing 1st layer nodes, total time is "<< MAT1_TOTAL_TIME / 1000
+         <<"ms, I/O read time is "<< MAT1_READ_TIME / 1000 <<"ms, CPU statistic time  is " << MAT1_CPU_TIME_STAT / 1000
+         << "ms, CPU copy Time is " << MAT1_CPU_TIME_COPY / 1000 << "ms, while I/O write time  is " << MAT1_WRITE_TIME / 1000 << "ms. "<< endl;
+
+    Const::logPrint("Start materialize saxes");
+    materializaSAX(node_set);
+
+    Const::logPrint("Start materialize internal nodes in the 1st layer");
+    materializeAllLeavesParallelSlowWriteParWrite2(datafn, root, navids, Const::fidxfn, sax_tbl);
+    Const::logPrint("build index successfully!");
+    delete[] saxes;
+    auto end_t = chrono::system_clock::now();
+    cout << "Total time is " << chrono::duration_cast<chrono::microseconds>(end_t - start_t).count() / 1000 << "ms."<<endl;
+    cout << "Building sax and paa total time is "<<SAX_PAA_TOTAL_TIME / 1000 <<"ms, cpu time is "
+         << SAX_PAA_CPU_TIME / 1000 <<"ms, I/O read time is " << SAX_PAA_READ_TIME / 1000 << "ms. io wait cpu time is "
+         << SAX_WAIT_TIME / 1000 <<"ms."<<endl;
+
+    cout << "During the process of building 1st layer index structure, CPU time is "<< GROW_CPU_TIME_1st / 1000 <<"ms, "<<endl;
+
+    cout << "During the process of materializing 1st layer nodes, total time is "<< MAT1_TOTAL_TIME / 1000
+         <<"ms, I/O read time is "<< MAT1_READ_TIME / 1000 <<"ms, CPU statistic time  is " << MAT1_CPU_TIME_STAT / 1000
+         << "ms, CPU copy Time is " << MAT1_CPU_TIME_COPY / 1000 << "ms, while I/O write time  is " << MAT1_WRITE_TIME / 1000 << "ms. "<< endl;
+
+    cout << "During the process of growing index structure, total time is "<< GROW_TOTAL_TIME / 1000
+         <<"ms, other CPU time is "<< GROW_CPU_TIME / 1000 <<"ms."<<endl;
+
+    cout << "During the process of materializing internal nodes, total time is "<<MAT2_TOTAL_TIME / 1000
+         <<"ms, I/O read time is "<<MAT2_READ_TIME / 1000 <<"ms, CPU time is " << MAT2_CPU_TIME / 1000
+         << "ms, while I/O write time is " << MAT2_WRITE_TIME / 1000 << "ms." << endl;
+
+    cout << "routing cost " << LB_SERIES_TIME / 1000 <<"ms, merging cost " << HEAP_TIME / 1000 << "ms." <<endl;
+    cout <<"read waiting costs " << WAIT_TIME_1 / 1000 <<"ms, write waiting costs " << WAIT_TIME_2 / 1000 << "ms." <<endl;
+
+    cout << "write sax needs " << SAX_WRITE_TIME / 1000 << "ms" << endl;
+
+    cout << "Random read count = " << RAND_READ_CNT << endl
+         << "Random write count = " << RAND_WRITE_CNT << endl
+         <<"Sequence read count = " << SEQ_READ_CNT << endl
+         <<"Sequence write count = " << SEQ_WRITE_CNT << endl
+         <<"Small file read bytes = "<<SMALL_FILES_BYTES_READ << endl
+         <<"Small file write bytes = " << SMALL_FILES_BYTES_WRITE << endl;
+
+    double output_time = (MAT1_WRITE_TIME + MAT2_WRITE_TIME + SAX_WRITE_TIME) / (1000.0 * 1000.0 * 60);
+    double input_time = (SAX_PAA_READ_TIME + MAT1_READ_TIME + MAT2_READ_TIME) /(1000.0 * 1000.0 * 60);
+    double cpu_time = (SAX_PAA_CPU_TIME + GROW_CPU_TIME_1st + MAT1_CPU_TIME_STAT + MAT1_CPU_TIME_COPY + GROW_TOTAL_TIME + MAT2_CPU_TIME) / (1000.0 * 1000.0 * 60);
+    cout << "Output needs" << output_time << " mins" <<endl
+         <<"Input needs" << input_time << " mins"<<endl
+         <<"CPU needs" << cpu_time << "mins"<<endl;
 
     root->getIndexStats();
 
@@ -2386,6 +3521,90 @@ void FADASNode::growIndex(){
 
 }
 
+void appendSaxIntoSaxBuffer(vector<unsigned short> &sax_buffer, unsigned short* saxes, vector<int>&offsets){
+    unsigned prev_size = sax_buffer.size();
+    sax_buffer.resize(prev_size + offsets.size() * Const::segmentNum);
+    for(unsigned  i = 0; i < offsets.size(); ++i){
+        copy(saxes + offsets[i] * Const::segmentNum, saxes + (offsets[i] + 1) * Const::segmentNum,
+             sax_buffer.begin() + prev_size + i * Const::segmentNum);
+    }
+
+}
+
+void appendSaxIntoSaxBuffer2(vector<unsigned short> &sax_buffer, unsigned short** saxes, vector<int>&offsets){
+    unsigned prev_size = sax_buffer.size();
+    sax_buffer.resize(prev_size + offsets.size() * Const::segmentNum);
+    for(unsigned  i = 0; i < offsets.size(); ++i){
+        copy(saxes[offsets[i]], saxes[offsets[i]] + Const::segmentNum,
+             sax_buffer.begin() + prev_size + i * Const::segmentNum);
+    }
+
+}
+
+void FADASNode::growIndexParallel(){
+    if(size <= Const::th)   return;
+    auto start = chrono::system_clock::now();
+//    int chosen_num = SaxUtil::findFirstGE(power_2, 1, Const::segmentNum + 1, size / Const::th + 1);
+//    SAX_INFO* sax_info = statSAX();
+//    chooseSegment(sax_info, chosen_num);
+    determineSegments2();
+    int chosen_num = chosenSegments.size();
+    // statistic children information in order to partition
+    partUnit nodes[1<<chosen_num];
+    for(int i=0;i<(1<<chosen_num);++i)
+        nodes[i].id = i, nodes[i].size=0, nodes[i].pid = -1;
+    vector<vector<int>>node_offsets(1<<chosen_num, vector<int>());
+
+    for(int i=0;i<size;++i){
+        int new_id = SaxUtil::extendSax(FADASNode::sax_tbl[offsets[i]], bits_cardinality,chosenSegments);
+        nodes[new_id].size++;
+        node_offsets[new_id].push_back(offsets[i]);
+    }
+
+    if(this->layer > 1) vector<int>().swap(offsets);
+
+    int partNum = partitionNew(nodes, chosen_num);
+
+    FADASNode* childrenList[partNum];
+    for(int i=0;i<partNum;++i)  childrenList[i] = new FADASNode(this, i);
+    children.resize(1 << chosen_num);
+    for(int i=0;i<(1 << chosen_num);++i){
+        if(nodes[i].size <= 0)  continue;
+        else if(nodes[i].size > Const::th) {
+            children[i] = new FADASNode(this, nodes[i].size, i);
+            generateSaxAndCardinality(children[i], i);
+            children[i]->offsets.resize(nodes[i].size);
+            copy(node_offsets[i].begin(),  node_offsets[i].end(), children[i]->offsets.begin());
+            vector<int>().swap(node_offsets[i]);
+        }else if(nodes[i].pid == -1){
+            children[i] = new FADASNode(this, nodes[i].size, i);
+            generateSaxAndCardinality(children[i], i);
+            appendSaxIntoSaxBuffer2(children[i]->sax_buffer, sax_tbl, node_offsets[i]);
+            vector<int>().swap(node_offsets[i]);
+        }
+        else{
+            int _pid = nodes[i].pid;
+            children[i] = childrenList[_pid];
+            childrenList[_pid]->size += nodes[i].size;
+            generateSaxAndCardinality4LeafNode(children[i], i);
+            appendSaxIntoSaxBuffer2(children[i]->sax_buffer, sax_tbl, node_offsets[i]);
+            vector<int>().swap(node_offsets[i]);
+        }
+    }
+
+    vector<vector<int>>().swap(node_offsets);
+    auto end = chrono::system_clock::now();
+    GROW_CPU_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+    for(auto &child: children){
+        if(child!= nullptr && child->size > Const::th){
+            child->growIndexParallel();
+        }
+    }
+
+}
+
+
 void FADASNode::growIndexLessPack() {
     if(size <= Const::th)   return;
     auto start = chrono::system_clock::now();
@@ -2773,66 +3992,66 @@ void FADASNode::determineFanout(int *lambda_min, int * lambda_max) const{
 }
 
 // determine fan-out and choose segments
-void FADASNode::determineSegmentsAvgVariance(){
-    int lambda_min, lambda_max;
-    determineFanout(&lambda_min, &lambda_max);
-
-    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
-    for(int offset:offsets){
-        unsigned short* cur_sax = saxes + offset * Const::segmentNum;
-        for(int i=0;i<Const::segmentNum;++i){
-            data_seg_symbols[i][cur_sax[i]]++;
-        }
-    }
-
-    // compute stdev of each segment
-    vector<double>data_seg_mean(Const::segmentNum, 0);
-    vector<double>data_seg_stdev(Const::segmentNum, 0);
-    for(int i=0;i<Const::segmentNum;++i){
-        auto& map = data_seg_symbols[i];
-        for(auto &iter:map){
-            unsigned short symbol = iter.first;
-            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
-        }
-        data_seg_mean[i] /= size;
-        for(auto &iter:map){
-            unsigned short symbol = iter.first;
-            double mid_value = SaxUtil::getMidLineFromSaxSymbolbc8(symbol);
-            data_seg_stdev[i] += (iter.second * ((mid_value - data_seg_mean[i]) * (mid_value - data_seg_mean[i])));
-        }
-//        data_seg_stdev[i] = sqrt(data_seg_stdev[i] / size);
-        data_seg_stdev[i] = data_seg_stdev[i] / size;
-    }
-
-    vector<double>().swap(data_seg_mean);
-    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
-
-    // start to compute the size of each node in each plan
-
-    unordered_set<int>visited;
-    double max_score = 0;
-    vector<int> best_plan;
-    for(int lambda = lambda_min; lambda <= lambda_max;++lambda){
-        int plan_num = FADASNode::combine_num[lambda];
-        for(int i=0;i<plan_num;++i){
-            int *plan = FADASNode::combines[lambda][i];
-            double score = 0;
-            for(int j = 0; j < lambda; ++j){
-                score += data_seg_stdev[plan[j]];
-            }
-            score /= lambda;
-            if(score > max_score){
-                max_score = score;
-                best_plan.clear();
-                for(int j = 0; j<lambda;++j)
-                    best_plan.push_back(plan[j]);
-            }
-        }
-    }
-
-    unordered_set<int>().swap(visited);
-    chosenSegments = best_plan;
-}
+//void FADASNode::determineSegmentsAvgVariance(){
+//    int lambda_min, lambda_max;
+//    determineFanout(&lambda_min, &lambda_max);
+//
+//    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
+//    for(int offset:offsets){
+//        unsigned short* cur_sax = saxes + offset * Const::segmentNum;
+//        for(int i=0;i<Const::segmentNum;++i){
+//            data_seg_symbols[i][cur_sax[i]]++;
+//        }
+//    }
+//
+//    // compute stdev of each segment
+//    vector<double>data_seg_mean(Const::segmentNum, 0);
+//    vector<double>data_seg_stdev(Const::segmentNum, 0);
+//    for(int i=0;i<Const::segmentNum;++i){
+//        auto& map = data_seg_symbols[i];
+//        for(auto &iter:map){
+//            unsigned short symbol = iter.first;
+//            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
+//        }
+//        data_seg_mean[i] /= size;
+//        for(auto &iter:map){
+//            unsigned short symbol = iter.first;
+//            double mid_value = SaxUtil::getMidLineFromSaxSymbolbc8(symbol);
+//            data_seg_stdev[i] += (iter.second * ((mid_value - data_seg_mean[i]) * (mid_value - data_seg_mean[i])));
+//        }
+////        data_seg_stdev[i] = sqrt(data_seg_stdev[i] / size);
+//        data_seg_stdev[i] = data_seg_stdev[i] / size;
+//    }
+//
+//    vector<double>().swap(data_seg_mean);
+//    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
+//
+//    // start to compute the size of each node in each plan
+//
+//    unordered_set<int>visited;
+//    double max_score = 0;
+//    vector<int> best_plan;
+//    for(int lambda = lambda_min; lambda <= lambda_max;++lambda){
+//        int plan_num = FADASNode::combine_num[lambda];
+//        for(int i=0;i<plan_num;++i){
+//            int *plan = FADASNode::combines[lambda][i];
+//            double score = 0;
+//            for(int j = 0; j < lambda; ++j){
+//                score += data_seg_stdev[plan[j]];
+//            }
+//            score /= lambda;
+//            if(score > max_score){
+//                max_score = score;
+//                best_plan.clear();
+//                for(int j = 0; j<lambda;++j)
+//                    best_plan.push_back(plan[j]);
+//            }
+//        }
+//    }
+//
+//    unordered_set<int>().swap(visited);
+//    chosenSegments = best_plan;
+//}
 
 #include <cstdlib>
 void FADASNode::determineSegmentsNaive() {
@@ -2938,6 +4157,93 @@ void FADASNode::determineSegments(){
     vector<int>().swap(unit_size);
     chosenSegments = best_plan;
 }
+
+void FADASNode::determineSegments2(){
+    int lambda_min, lambda_max;
+    determineFanout(&lambda_min, &lambda_max);
+    if(lambda_min == Const::segmentNum && lambda_max == Const::segmentNum){
+        for(int i=0;i<Const::segmentNum;++i)
+            chosenSegments.push_back(i);
+        return;
+    }
+    vector<int>unit_size(Const::vertexNum, 0);
+
+    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
+    for(int offset:offsets){
+        unsigned short* cur_sax = sax_tbl[offset];
+        for(int i=0;i<Const::segmentNum;++i){
+            data_seg_symbols[i][cur_sax[i]]++;
+        }
+        int head = SaxUtil::extendSax(cur_sax, bits_cardinality);
+        unit_size[head]++;
+    }
+
+    // compute stdev of each segment
+    vector<double>data_seg_mean(Const::segmentNum, 0);
+    vector<double>data_seg_stdev(Const::segmentNum, 0);
+    for(int i=0;i<Const::segmentNum;++i){
+        auto& map = data_seg_symbols[i];
+        for(auto &iter:map){
+            unsigned short symbol = iter.first;
+            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
+        }
+        data_seg_mean[i] /= size;
+        for(auto &iter:map){
+            unsigned short symbol = iter.first;
+            double mid_value = SaxUtil::getMidLineFromSaxSymbolbc8(symbol);
+            data_seg_stdev[i] += (iter.second * ((mid_value - data_seg_mean[i]) * (mid_value - data_seg_mean[i])));
+        }
+//        data_seg_stdev[i] = sqrt(data_seg_stdev[i] / size);
+        data_seg_stdev[i] /= size;
+    }
+
+    vector<double>().swap(data_seg_mean);
+    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
+
+    // start to compute the size of each node in each plan
+    int plan_num;
+    if(lambda_max < Const::segmentNum)
+        plan_num = FADASNode::combine_num[lambda_max];
+    else
+        plan_num = 1;
+    unordered_set<int>visited;
+    double max_score = 0;
+    vector<int> best_plan;
+    for(int i=0;i<plan_num;++i){
+        int *plan = FADASNode::combines[lambda_max][i];
+        // first evaluate the whole plan
+        vector<int>plan_node_sizes(1<<lambda_max, 0);
+        int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
+        map<int,int>max_node_size;
+        for(int j=0;j<Const::vertexNum;++j){
+            max_node_size[mask_code & j] += unit_size[j];
+        }
+//        assert(max_node_size.size() == (1 << lambda_max));
+        int _ = 0;
+        for(auto & iter: max_node_size){
+            plan_node_sizes[_++] = iter.second;
+        }
+        map<int,int>().swap(max_node_size);
+
+        double score = compute_score(plan_node_sizes, plan, lambda_max, data_seg_stdev);
+        if(score > max_score){
+            max_score = score;
+            best_plan.clear();
+            for(int j = 0; j<lambda_max;++j)
+                best_plan.push_back(plan[j]);
+        }
+
+        if(lambda_min <= lambda_max - 1)
+            visitPlanFromBaseTable(visited, lambda_max - 1, plan, plan_node_sizes,
+                                   &max_score, best_plan, lambda_min, mask_code, data_seg_stdev, score);
+        vector<int>().swap(plan_node_sizes);
+    }
+
+    unordered_set<int>().swap(visited);
+    vector<int>().swap(unit_size);
+    chosenSegments = best_plan;
+}
+
 
 void FADASNode::determineSegments(unsigned short *node_saxes) {
     int lambda_min, lambda_max;
@@ -3102,94 +4408,94 @@ double FADASNode::compute_score(vector<int>&node_sizes, int *plan, int lambda, v
 }
 
 // determine fan-out and choose segments
-void FADASNode::determineSegmentsCluster(){
-    int lambda_min, lambda_max;
-    determineFanout(&lambda_min, &lambda_max);
-
-    vector<int>unit_size(Const::vertexNum, 0);
-    vector<vector<double>>unit_seg_sum(Const::vertexNum , vector<double>(Const::segmentNum, 0));
-    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
-
-    for(int offset:offsets){
-        unsigned short* cur_sax = saxes + offset * Const::segmentNum;
-        int head = SaxUtil::extendSax(cur_sax, bits_cardinality);
-        unit_size[head]++;
-        for(int i=0;i<Const::segmentNum;++i) {
-            unit_seg_sum[head][i] += SaxUtil::getMidLineFromSaxSymbolbc8(cur_sax[i]);
-            data_seg_symbols[i][cur_sax[i]]++;
-        }
-    }
-    vector<double>data_seg_mean(Const::segmentNum, 0);
-    for(int i=0;i<Const::segmentNum;++i){
-        auto& map = data_seg_symbols[i];
-        for(auto &iter:map){
-            unsigned short symbol = iter.first;
-            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
-        }
-        data_seg_mean[i] /= size;
-    }
-    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
-
-    // start to compute the size of each node in each plan
-    int plan_num = FADASNode::combine_num[lambda_max];
-    unordered_set<int>visited;
-    double max_score = 0;
-    vector<int> best_plan;
-    for(int i=0;i<plan_num;++i){
-        int *plan = FADASNode::combines[lambda_max][i];
-        // first evaluate the whole plan
-        vector<int>plan_node_sizes(1<<lambda_max, 0);
-        vector<vector<double>>plan_node_seg_mean(1<<lambda_max, vector<double>(Const::segmentNum,0));
-        vector<vector<double>>plan_node_seg_sum(1<<lambda_max, vector<double>(Const::segmentNum, 0));
-        int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
-        map<int,int>max_node_size;
-        map<int,vector<double>>max_node_seg_sum;
-        for(int j=0;j<Const::vertexNum;++j){
-            max_node_size[mask_code & j] += unit_size[j];
-            if(max_node_seg_sum[mask_code & j].empty()){
-                max_node_seg_sum[mask_code & j].resize(Const::segmentNum, 0);
-            }
-            for(int k=0;k<Const::segmentNum;++k)
-                max_node_seg_sum[mask_code & j][k] += unit_seg_sum[j][k];
-        }
-//        assert(max_node_size.size() == (1 << lambda_max));
-        int _ = 0;
-        for(auto & iter: max_node_size) plan_node_sizes[_++] = iter.second;
-        map<int,int>().swap(max_node_size);
-        _ = 0;
-        for(auto & iter: max_node_seg_sum)  {
-            vector<double>&tmp = iter.second;
-            for(int k=0;k<Const::segmentNum;++k) {
-                plan_node_seg_sum[_][k] = tmp[k];
-                plan_node_seg_mean[_][k] = tmp[k] / plan_node_sizes[_];
-            }
-            ++_;
-        }
-        map<int,vector<double>>().swap(max_node_seg_sum);
-
-        double score = compute_score_cluster(plan_node_sizes, plan_node_seg_mean, data_seg_mean,
-                                             plan, lambda_max);
-        if(score > max_score){
-            max_score = score;
-            best_plan.clear();
-            for(int j = 0; j<lambda_max;++j)
-                best_plan.push_back(plan[j]);
-        }
-
-        if(lambda_min <= lambda_max - 1)
-            visitPlanFromBaseTableCluster(visited, lambda_max - 1, plan,
-                                          plan_node_sizes, plan_node_seg_sum,
-                                   &max_score, best_plan, lambda_min, mask_code, data_seg_mean);
-        vector<int>().swap(plan_node_sizes);
-        vector<vector<double>>().swap(plan_node_seg_mean);
-        vector<vector<double>>().swap(plan_node_seg_sum);
-    }
-
-    unordered_set<int>().swap(visited);
-    vector<int>().swap(unit_size);
-    vector<vector<double>>().swap(unit_seg_sum);
-    chosenSegments = best_plan;
-}
+//void FADASNode::determineSegmentsCluster(){
+//    int lambda_min, lambda_max;
+//    determineFanout(&lambda_min, &lambda_max);
+//
+//    vector<int>unit_size(Const::vertexNum, 0);
+//    vector<vector<double>>unit_seg_sum(Const::vertexNum , vector<double>(Const::segmentNum, 0));
+//    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
+//
+//    for(int offset:offsets){
+//        unsigned short* cur_sax = saxes + offset * Const::segmentNum;
+//        int head = SaxUtil::extendSax(cur_sax, bits_cardinality);
+//        unit_size[head]++;
+//        for(int i=0;i<Const::segmentNum;++i) {
+//            unit_seg_sum[head][i] += SaxUtil::getMidLineFromSaxSymbolbc8(cur_sax[i]);
+//            data_seg_symbols[i][cur_sax[i]]++;
+//        }
+//    }
+//    vector<double>data_seg_mean(Const::segmentNum, 0);
+//    for(int i=0;i<Const::segmentNum;++i){
+//        auto& map = data_seg_symbols[i];
+//        for(auto &iter:map){
+//            unsigned short symbol = iter.first;
+//            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
+//        }
+//        data_seg_mean[i] /= size;
+//    }
+//    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
+//
+//    // start to compute the size of each node in each plan
+//    int plan_num = FADASNode::combine_num[lambda_max];
+//    unordered_set<int>visited;
+//    double max_score = 0;
+//    vector<int> best_plan;
+//    for(int i=0;i<plan_num;++i){
+//        int *plan = FADASNode::combines[lambda_max][i];
+//        // first evaluate the whole plan
+//        vector<int>plan_node_sizes(1<<lambda_max, 0);
+//        vector<vector<double>>plan_node_seg_mean(1<<lambda_max, vector<double>(Const::segmentNum,0));
+//        vector<vector<double>>plan_node_seg_sum(1<<lambda_max, vector<double>(Const::segmentNum, 0));
+//        int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
+//        map<int,int>max_node_size;
+//        map<int,vector<double>>max_node_seg_sum;
+//        for(int j=0;j<Const::vertexNum;++j){
+//            max_node_size[mask_code & j] += unit_size[j];
+//            if(max_node_seg_sum[mask_code & j].empty()){
+//                max_node_seg_sum[mask_code & j].resize(Const::segmentNum, 0);
+//            }
+//            for(int k=0;k<Const::segmentNum;++k)
+//                max_node_seg_sum[mask_code & j][k] += unit_seg_sum[j][k];
+//        }
+////        assert(max_node_size.size() == (1 << lambda_max));
+//        int _ = 0;
+//        for(auto & iter: max_node_size) plan_node_sizes[_++] = iter.second;
+//        map<int,int>().swap(max_node_size);
+//        _ = 0;
+//        for(auto & iter: max_node_seg_sum)  {
+//            vector<double>&tmp = iter.second;
+//            for(int k=0;k<Const::segmentNum;++k) {
+//                plan_node_seg_sum[_][k] = tmp[k];
+//                plan_node_seg_mean[_][k] = tmp[k] / plan_node_sizes[_];
+//            }
+//            ++_;
+//        }
+//        map<int,vector<double>>().swap(max_node_seg_sum);
+//
+//        double score = compute_score_cluster(plan_node_sizes, plan_node_seg_mean, data_seg_mean,
+//                                             plan, lambda_max);
+//        if(score > max_score){
+//            max_score = score;
+//            best_plan.clear();
+//            for(int j = 0; j<lambda_max;++j)
+//                best_plan.push_back(plan[j]);
+//        }
+//
+//        if(lambda_min <= lambda_max - 1)
+//            visitPlanFromBaseTableCluster(visited, lambda_max - 1, plan,
+//                                          plan_node_sizes, plan_node_seg_sum,
+//                                   &max_score, best_plan, lambda_min, mask_code, data_seg_mean);
+//        vector<int>().swap(plan_node_sizes);
+//        vector<vector<double>>().swap(plan_node_seg_mean);
+//        vector<vector<double>>().swap(plan_node_seg_sum);
+//    }
+//
+//    unordered_set<int>().swap(visited);
+//    vector<int>().swap(unit_size);
+//    vector<vector<double>>().swap(unit_seg_sum);
+//    chosenSegments = best_plan;
+//}
 
 void
 FADASNode::visitPlanFromBaseTableCluster(unordered_set<int> &visited, int cur_lambda, const int *plan,
@@ -3297,95 +4603,95 @@ double FADASNode::compute_score_cluster(vector<int>&node_sizes, vector<vector<do
     return ret;
 }
 
-// determine fan-out and choose segments
-void FADASNode::determineSegmentsWeakCluster(){
-    int lambda_min, lambda_max;
-    determineFanout(&lambda_min, &lambda_max);
-
-    vector<int>unit_size(Const::vertexNum, 0);
-    vector<vector<double>>unit_seg_sum(Const::vertexNum , vector<double>(Const::segmentNum, 0));
-    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
-
-    for(int offset:offsets){
-        unsigned short* cur_sax = saxes + offset * Const::segmentNum;
-        int head = SaxUtil::extendSax(cur_sax, bits_cardinality);
-        unit_size[head]++;
-        for(int i=0;i<Const::segmentNum;++i) {
-            unit_seg_sum[head][i] += SaxUtil::getMidLineFromSaxSymbolbc8(cur_sax[i]);
-            data_seg_symbols[i][cur_sax[i]]++;
-        }
-    }
-    vector<double>data_seg_mean(Const::segmentNum, 0);
-    for(int i=0;i<Const::segmentNum;++i){
-        auto& map = data_seg_symbols[i];
-        for(auto &iter:map){
-            unsigned short symbol = iter.first;
-            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
-        }
-        data_seg_mean[i] /= size;
-    }
-    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
-
-    // start to compute the size of each node in each plan
-    int plan_num = FADASNode::combine_num[lambda_max];
-    unordered_set<int>visited;
-    double max_score = 0;
-    vector<int> best_plan;
-    for(int i=0;i<plan_num;++i){
-        int *plan = FADASNode::combines[lambda_max][i];
-        // first evaluate the whole plan
-        vector<int>plan_node_sizes(1<<lambda_max, 0);
-        vector<vector<double>>plan_node_seg_mean(1<<lambda_max, vector<double>(lambda_max,0));
-        vector<vector<double>>plan_node_seg_sum(1<<lambda_max, vector<double>(lambda_max, 0));
-        int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
-        map<int,int>max_node_size;
-        map<int,vector<double>>max_node_seg_sum;
-        for(int j=0;j<Const::vertexNum;++j){
-            max_node_size[mask_code & j] += unit_size[j];
-            if(max_node_seg_sum[mask_code & j].empty()){
-                max_node_seg_sum[mask_code & j].resize(lambda_max, 0);
-            }
-            for(int k=0;k<lambda_max;++k)
-                max_node_seg_sum[mask_code & j][k] += unit_seg_sum[j][k];
-        }
-//        assert(max_node_size.size() == (1 << lambda_max));
-        int _ = 0;
-        for(auto & iter: max_node_size) plan_node_sizes[_++] = iter.second;
-        map<int,int>().swap(max_node_size);
-        _ = 0;
-        for(auto & iter: max_node_seg_sum)  {
-            vector<double>&tmp = iter.second;
-            for(int k=0;k<lambda_max;++k) {
-                plan_node_seg_sum[_][k] = tmp[k];
-                plan_node_seg_mean[_][k] = tmp[k] / plan_node_sizes[_];
-            }
-            ++_;
-        }
-        map<int,vector<double>>().swap(max_node_seg_sum);
-
-        double score = compute_score_cluster_weak(plan_node_sizes, plan_node_seg_mean, data_seg_mean,
-                                             plan, lambda_max);
-        if(score > max_score){
-            max_score = score;
-            best_plan.clear();
-            for(int j = 0; j<lambda_max;++j)
-                best_plan.push_back(plan[j]);
-        }
-
-        if(lambda_min <= lambda_max - 1)
-            visitPlanFromBaseTableWeakCluster(visited, lambda_max - 1, plan,
-                                          plan_node_sizes, plan_node_seg_sum,
-                                          &max_score, best_plan, lambda_min, mask_code, data_seg_mean);
-        vector<int>().swap(plan_node_sizes);
-        vector<vector<double>>().swap(plan_node_seg_mean);
-        vector<vector<double>>().swap(plan_node_seg_sum);
-    }
-
-    unordered_set<int>().swap(visited);
-    vector<int>().swap(unit_size);
-    vector<vector<double>>().swap(unit_seg_sum);
-    chosenSegments = best_plan;
-}
+//// determine fan-out and choose segments
+//void FADASNode::determineSegmentsWeakCluster(){
+//    int lambda_min, lambda_max;
+//    determineFanout(&lambda_min, &lambda_max);
+//
+//    vector<int>unit_size(Const::vertexNum, 0);
+//    vector<vector<double>>unit_seg_sum(Const::vertexNum , vector<double>(Const::segmentNum, 0));
+//    vector<unordered_map<unsigned short, int>>data_seg_symbols(Const::segmentNum);
+//
+//    for(int offset:offsets){
+//        unsigned short* cur_sax = saxes + offset * Const::segmentNum;
+//        int head = SaxUtil::extendSax(cur_sax, bits_cardinality);
+//        unit_size[head]++;
+//        for(int i=0;i<Const::segmentNum;++i) {
+//            unit_seg_sum[head][i] += SaxUtil::getMidLineFromSaxSymbolbc8(cur_sax[i]);
+//            data_seg_symbols[i][cur_sax[i]]++;
+//        }
+//    }
+//    vector<double>data_seg_mean(Const::segmentNum, 0);
+//    for(int i=0;i<Const::segmentNum;++i){
+//        auto& map = data_seg_symbols[i];
+//        for(auto &iter:map){
+//            unsigned short symbol = iter.first;
+//            data_seg_mean[i] += (SaxUtil::getMidLineFromSaxSymbolbc8(symbol) * iter.second);
+//        }
+//        data_seg_mean[i] /= size;
+//    }
+//    vector<unordered_map<unsigned short, int>>().swap(data_seg_symbols);
+//
+//    // start to compute the size of each node in each plan
+//    int plan_num = FADASNode::combine_num[lambda_max];
+//    unordered_set<int>visited;
+//    double max_score = 0;
+//    vector<int> best_plan;
+//    for(int i=0;i<plan_num;++i){
+//        int *plan = FADASNode::combines[lambda_max][i];
+//        // first evaluate the whole plan
+//        vector<int>plan_node_sizes(1<<lambda_max, 0);
+//        vector<vector<double>>plan_node_seg_mean(1<<lambda_max, vector<double>(lambda_max,0));
+//        vector<vector<double>>plan_node_seg_sum(1<<lambda_max, vector<double>(lambda_max, 0));
+//        int mask_code = MathUtil::generateMaskSettingKbits(plan, lambda_max, Const::segmentNum);
+//        map<int,int>max_node_size;
+//        map<int,vector<double>>max_node_seg_sum;
+//        for(int j=0;j<Const::vertexNum;++j){
+//            max_node_size[mask_code & j] += unit_size[j];
+//            if(max_node_seg_sum[mask_code & j].empty()){
+//                max_node_seg_sum[mask_code & j].resize(lambda_max, 0);
+//            }
+//            for(int k=0;k<lambda_max;++k)
+//                max_node_seg_sum[mask_code & j][k] += unit_seg_sum[j][k];
+//        }
+////        assert(max_node_size.size() == (1 << lambda_max));
+//        int _ = 0;
+//        for(auto & iter: max_node_size) plan_node_sizes[_++] = iter.second;
+//        map<int,int>().swap(max_node_size);
+//        _ = 0;
+//        for(auto & iter: max_node_seg_sum)  {
+//            vector<double>&tmp = iter.second;
+//            for(int k=0;k<lambda_max;++k) {
+//                plan_node_seg_sum[_][k] = tmp[k];
+//                plan_node_seg_mean[_][k] = tmp[k] / plan_node_sizes[_];
+//            }
+//            ++_;
+//        }
+//        map<int,vector<double>>().swap(max_node_seg_sum);
+//
+//        double score = compute_score_cluster_weak(plan_node_sizes, plan_node_seg_mean, data_seg_mean,
+//                                             plan, lambda_max);
+//        if(score > max_score){
+//            max_score = score;
+//            best_plan.clear();
+//            for(int j = 0; j<lambda_max;++j)
+//                best_plan.push_back(plan[j]);
+//        }
+//
+//        if(lambda_min <= lambda_max - 1)
+//            visitPlanFromBaseTableWeakCluster(visited, lambda_max - 1, plan,
+//                                          plan_node_sizes, plan_node_seg_sum,
+//                                          &max_score, best_plan, lambda_min, mask_code, data_seg_mean);
+//        vector<int>().swap(plan_node_sizes);
+//        vector<vector<double>>().swap(plan_node_seg_mean);
+//        vector<vector<double>>().swap(plan_node_seg_sum);
+//    }
+//
+//    unordered_set<int>().swap(visited);
+//    vector<int>().swap(unit_size);
+//    vector<vector<double>>().swap(unit_seg_sum);
+//    chosenSegments = best_plan;
+//}
 
 void
 FADASNode::visitPlanFromBaseTableWeakCluster(unordered_set<int> &visited, int cur_lambda, const int *plan,
@@ -4178,13 +5484,13 @@ void FADASNode::getIndexStats(){
     cout << "Avg. Height = " << getSumHeight() / (double) total_leaf_node_num << endl;
     cout <<"Avg. Filling Factor = "<< total_size / (double)total_leaf_node_num / Const::th << endl;
     cout << "Bias leaf node ratio = " << (double)getBiasLeafNodeNum() / total_leaf_node_num << endl;
-    double sum = 0, sum_square  = 0, sum_dist = 0;
-    int deep_leaf_num = 0;
-    getBoundRange(&sum, &sum_square, &deep_leaf_num, &sum_dist);
-    cout << "deep layer leaf number = " << deep_leaf_num <<endl;
-    cout << "total sum = " << sum <<", avg sum = " << sum / deep_leaf_num << endl;
-    cout << "total sum_square = " << sum_square << ", avg sum square = " << sum_square / deep_leaf_num << endl;
-    cout << "total sum_distance = " << sum_dist << ", avg sum dist = " << sum_dist / deep_leaf_num << endl;
+//    double sum = 0, sum_square  = 0, sum_dist = 0;
+//    int deep_leaf_num = 0;
+//    getBoundRange(&sum, &sum_square, &deep_leaf_num, &sum_dist);
+//    cout << "deep layer leaf number = " << deep_leaf_num <<endl;
+//    cout << "total sum = " << sum <<", avg sum = " << sum / deep_leaf_num << endl;
+//    cout << "total sum_square = " << sum_square << ", avg sum square = " << sum_square / deep_leaf_num << endl;
+//    cout << "total sum_distance = " << sum_dist << ", avg sum dist = " << sum_dist / deep_leaf_num << endl;
 }
 
 int FADASNode::get1stLayerInterNodesNo(){
@@ -4334,9 +5640,22 @@ int FADASNode::getSumHeight(){
 
 int FADASNode::loadSax(const string & saxfn){
     long f_size = FileUtil::getFileSize(saxfn.c_str()), series_num = f_size / (sizeof(unsigned short) * Const::segmentNum);
-    saxes = new unsigned short [f_size / sizeof(unsigned short )];
+    saxes = new(nothrow) unsigned short [f_size / sizeof(unsigned short )];
     FILE *f = fopen(saxfn.c_str(), "rb");
     fread(saxes, sizeof(unsigned short ), f_size / sizeof(unsigned short), f);
+    fclose(f);
+    Const::logPrint("Finish loading sax");
+    return series_num;
+}
+
+int FADASNode::loadSax2(const string & saxfn){
+    long f_size = FileUtil::getFileSize(saxfn.c_str()), series_num = f_size / (sizeof(unsigned short) * Const::segmentNum);
+    sax_tbl = new(nothrow) unsigned short* [series_num];
+    FILE *f = fopen(saxfn.c_str(), "rb");
+    for(unsigned i = 0; i < series_num; ++i){
+        sax_tbl[i] = new unsigned short[Const::segmentNum];
+        fread(sax_tbl[i], sizeof(unsigned short), Const::segmentNum, f);
+    }
     fclose(f);
     Const::logPrint("Finish loading sax");
     return series_num;
@@ -4473,6 +5792,173 @@ long FADASNode::generateSaxTbl(){
 
     fclose(f);
     return series_num;
+}
+
+void SAXComputeWorker(float*tss, unsigned num, unsigned short *saxes, int cur){
+    for(unsigned i=0;i<num;++i){
+        if(isnan(tss[i * Const::tsLength])){
+            for(int j = 0; j < Const::segmentNum; ++j)
+                saxes[i * Const::segmentNum + j] = 0;
+            cout << "Dirty data: "<<i << "," <<endl;
+        }
+        else{
+            SaxUtil::saxFromTs(tss + i * Const::tsLength, saxes + (cur+ i) * Const::segmentNum,
+                               Const::tsLengthPerSegment, Const::segmentNum, Const::cardinality);
+        }
+    }
+}
+
+static timeval end_sax_time;
+mutex sax_m;
+void SAXComputeWorker2(float*tss, unsigned num, unsigned short**sax_tbl, int cur){
+    for(unsigned i=0;i<num;++i){
+        sax_tbl[cur + i] = new unsigned short[Const::segmentNum];
+        if(isnan(tss[i * Const::tsLength])){
+            for(int j = 0; j < Const::segmentNum; ++j)
+                sax_tbl[cur + i][j] = 0;
+            cout << "Dirty data: "<<i << "," <<endl;
+        }
+        else{
+            SaxUtil::saxFromTs(tss + i * Const::tsLength, sax_tbl[cur + i] ,
+                               Const::tsLengthPerSegment, Const::segmentNum, Const::cardinality);
+        }
+    }
+    {
+        sax_m.lock();
+        Const::timer_start(&end_sax_time);
+        sax_m.unlock();
+    }
+
+}
+
+long FADASNode::generateSaxTblParallel2(){
+    string fn = Const::datafn;
+    long series_num;
+    if(Const::series_num == -1) {
+        long fs = FileUtil::getFileSize(fn.c_str());
+        series_num = fs / Const::tsLengthBytes;
+    }else{
+        series_num = Const::series_num;
+    }
+    cout << "Total Series Number is "<<series_num <<endl;
+    float ts[Const::tsLength];
+    sax_tbl = new(nothrow) unsigned short* [series_num];
+    long rest = series_num, cur = 0;
+    FILE *f = fopen(fn.c_str(), "rb");
+    unsigned buf_series_num = Const::fbl_series_num > 200000 ? 200000: Const::fbl_series_num;
+    vector<vector<float>>tss(2, vector<float>(buf_series_num * Const::tsLength));
+    unsigned num = rest > buf_series_num ? buf_series_num : rest;
+    auto start = chrono::system_clock::now();
+    fread(tss[0].data(), sizeof(float),num * Const::tsLength,  f);
+    auto end = chrono::system_clock::now();
+    SAX_PAA_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+    rest -= num;
+    cur += num;
+    int cur_buf = 0;
+    vector<thread>sax_workers;
+    timeval sax_start;
+
+    while(rest > 0){
+        sax_workers.clear();
+        int batch_num = num / Const::thread_num;
+        Const::timer_start(&sax_start);
+        for(int i = 0 ;i < Const::thread_num - 1; ++i){
+            sax_workers.emplace_back(SAXComputeWorker2, tss[cur_buf].data(), batch_num,  sax_tbl, (cur - num) + i * batch_num);
+        }
+        sax_workers.emplace_back(SAXComputeWorker2, tss[cur_buf].data(), num - ((Const::thread_num - 1) * batch_num),
+                                 sax_tbl, (cur - num) + (Const::thread_num - 1) * batch_num );
+
+        num = rest > buf_series_num ? buf_series_num : rest;
+        cur_buf = 1 - cur_buf;
+
+        start = chrono::system_clock::now();
+        fread(tss[cur_buf].data(), sizeof(float),num * Const::tsLength,  f);
+        end = chrono::system_clock::now();
+        SAX_PAA_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+        rest -= num;
+        cur += num;
+
+        start = chrono::system_clock::now();
+        for(int i = 0 ;i < Const::thread_num ; ++i)
+            sax_workers[i].join();
+        end = chrono::system_clock::now();
+        SAX_WAIT_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+        SAX_PAA_CPU_TIME += (end_sax_time.tv_sec - sax_start.tv_sec)*1000000 + ((double)end_sax_time.tv_usec - sax_start.tv_usec);
+
+    }
+    start = chrono::system_clock::now();
+    sax_workers.clear();
+    int batch_num = num / Const::thread_num;
+    for(int i = 0 ;i < Const::thread_num - 1; ++i){
+        sax_workers.emplace_back(SAXComputeWorker2, tss[cur_buf].data(), batch_num,  sax_tbl, (cur - num) + i * batch_num);
+    }
+    sax_workers.emplace_back(SAXComputeWorker2, tss[cur_buf].data(), num - ((Const::thread_num - 1) * batch_num),
+                             sax_tbl, (cur - num) + (Const::thread_num - 1) * batch_num );
+    for(int i = 0 ;i < Const::thread_num ; ++i)
+        sax_workers[i].join();
+
+    end = chrono::system_clock::now();
+    SAX_WAIT_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+    fclose(f);
+    return series_num;
+
+}
+
+long FADASNode::generateSaxTblParallel(){
+    string fn = Const::datafn;
+    long series_num;
+    if(Const::series_num == -1) {
+        long fs = FileUtil::getFileSize(fn.c_str());
+        series_num = fs / Const::tsLengthBytes;
+    }else{
+        series_num = Const::series_num;
+    }
+    cout << "Total Series Number is "<<series_num <<endl;
+    float ts[Const::tsLength];
+    saxes = new unsigned short[series_num * Const::segmentNum];
+    long rest = series_num, cur = 0;
+    FILE *f = fopen(fn.c_str(), "rb");
+    unsigned buf_series_num = series_num < 2000000 ? series_num : 2000000;
+    vector<vector<float>>tss(2, vector<float>(buf_series_num * Const::tsLength));
+    unsigned num = rest > buf_series_num ? buf_series_num : rest;
+    auto start = chrono::system_clock::now();
+    fread(tss[0].data(), sizeof(float),num * Const::tsLength,  f);
+    auto end = chrono::system_clock::now();
+    SAX_PAA_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+    rest -= num;
+    cur += num;
+    int cur_buf = 0;
+    thread* saxworker;
+
+    while(rest > 0){
+        saxworker = new thread(SAXComputeWorker, tss[cur_buf].data(), num,  saxes, cur - num);
+
+        num = rest > buf_series_num ? buf_series_num : rest;
+        cur_buf = 1 - cur_buf;
+
+        start = chrono::system_clock::now();
+        fread(tss[cur_buf].data(), sizeof(float),num * Const::tsLength,  f);
+        end = chrono::system_clock::now();
+        SAX_PAA_READ_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+        rest -= num;
+        cur += num;
+
+        start = chrono::system_clock::now();
+        saxworker->join();
+        end = chrono::system_clock::now();
+        SAX_PAA_CPU_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+    }
+    start = chrono::system_clock::now();
+    saxworker = new thread(SAXComputeWorker, tss[cur_buf].data(), num,  saxes, cur - num);
+    saxworker->join();
+    end = chrono::system_clock::now();
+    SAX_PAA_CPU_TIME += chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+    fclose(f);
+    return series_num;
+
 }
 
 void FADASNode::generateSaxTbl(const float*tss, int series_num){

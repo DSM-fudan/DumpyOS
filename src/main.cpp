@@ -570,8 +570,8 @@ void test3(){
 //}
 
 void generateRandQuery(){
-    string fn = "../data/generator/rand-256-2k.bin";
-    RandDataGenerator::generate_random_timeseries(256, 2000, fn.c_str());
+    string fn = "/home/wzy/data/rand/rand-256-300m.bin";
+    RandDataGenerator::generate_random_timeseries(256, 300000000, fn.c_str());
 
 }
 
@@ -643,6 +643,11 @@ void buildFADAS(){
     root->save2Disk(Const::fidxfn + "root.idx");
 }
 
+void buildDumpyParallel(){
+    FADASNode* root = FADASNode::BuildIndexParallel(Const::datafn, Const::saxfn);
+    root->save2Disk(Const::fidxfn + "root.idx");
+}
+
 void buildTARDISORIGIN(){
     TARGNode* root = TARGNode::buildIndex();
     root->save2Disk(Const::tardisfn + "root.idx");
@@ -658,6 +663,12 @@ void ngSearch(){
     FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
     auto *g = loadGraphSkeleton();
     Recall::ngSearchDumpy(root, g);
+}
+
+void ngSearchDumpyParallel(){
+    FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
+    auto *g = loadGraphSkeleton();
+    Recall::ngSearchDumpyParallel(root, g);
 }
 
 void ngSearchFuzzy(){
@@ -759,10 +770,22 @@ void exactExprFADAS(){
     Recall::exactSearchFADAS(root,g);
 }
 
+void exactSearchDumpyParallelDTW(){
+    FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
+    auto *g = loadGraphSkeleton();
+    Recall::exactSearchDumpyParallelDTW(root,g);
+}
+
 void exactExprFADASParallel(){
     FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
     auto *g = loadGraphSkeleton();
     Recall::exactSearchDumpyParallel(root,g);
+}
+
+void multiwayDumpySearch(){
+    FADASNode* root = FADASNode::loadFromDisk(Const::saxfn, Const::fidxfn + "root.idx", false);
+    auto *g = loadGraphSkeleton();
+    Recall::multiwayDumpySearch(root, g, Const::fidxfn);
 }
 
 void exactExprFADASDTW(){
@@ -861,6 +884,22 @@ int main() {
                         exactExprFADASParallel();
                     else
                         Const::logPrint("not supported now!");
+                    break;
+                case 12:
+                    if(Const::materialized == 1)
+                        multiwayDumpySearch();
+                    break;
+                case 13:
+                    if(Const::materialized == 1)
+                        buildDumpyParallel();
+                    break;
+                case 14:
+                    if(Const::materialized == 1)
+                        exactSearchDumpyParallelDTW();
+                    break;
+                case 15:
+                    if(Const::materialized == 1)
+                        ngSearchDumpyParallel();
                     break;
                 default:
                     break;
@@ -974,8 +1013,9 @@ int main() {
         default:    break;
     }
 
-    {
-        //generateQueryFile();
+{
+//generateRandQuery();
+//generateQueryFile();
 //generateGroundTruth();
 //generateGroundTruthDTW();
 //generateSax();
@@ -1051,7 +1091,4 @@ int main() {
 //            cout << a <<endl;
 //        cout << SaxUtil::invSaxHeadFromSax(sax, Const::bitsCardinality, Const::segmentNum);
     }
-
-
-
 }

@@ -1,0 +1,336 @@
+dataset: rand
+method: 
+index: 1
+materialized: 1
+ops: 11
+maxK: 50
+query_num: 100000
+messi_pq_num: 1
+SSD_pq_num: 24
+series_num: 100000000
+k: 50
+thread_num: 4
+batch_size: 1400000
+batch_num: 50
+pre_read: 1
+dtw_window_percent: 0.05
+th: 10000
+fbl_size: 32768
+max_diff: 3
+bitsCardinality: 8
+boundary_1st: 0.3
+boundary: 0.3
+imbalance: 0.3
+small_perc: 1
+f_low: 0.5
+f_high: 1.5
+alpha: 0.2
+max_mask_bit_percentage: 0.5
+tardis_sample_percent: 1
+max_replica: 2
+filling_factor_1st: 0.8
+filling_factor: 0.5
+max_radius: 6
+graphfn: ../RowGraph_16_3.bin
+bitsReserve: 3
+tsLength: 256
+paafn: /mnt/c/Series4Similarity_Search/rand/paa/rand-256-100m-16.bin
+saxfn: /mnt/c/Series4Similarity_Search/rand/sax/rand-256-100m-16.bin
+idxfn: 
+fidxfn: /home/wzy/data/rand/index/
+posidxfn: 
+fuzzyidxfn: /home/wzy/data/rand/fuzzy/
+datafn: /home/wzy/data/rand/rand-256-100m.bin
+queryfn: /home/wzy/data/rand/rand-256-100k.bin
+resfn: /mnt/c/Series4Similarity_Search/rand/rand-256-200-50.bin
+dtwresfn: /mnt/c/Series4Similarity_Search/rand/rand-256-200-50-dtw2.bin
+dstreefn: /mnt/c/Series4Similarity_Search/ds-tree/rand/
+tardisfn: /mnt/c/Series4Similarity_Search/ds-tree/rand/
+buffer_series_num: 16777215
+21:52:33: result file is /mnt/c/Series4Similarity_Search/rand/rand-256-200-50.bin
+------------------Experiment--------------------
+k: 50
+500
+Now 1278.150s, on average 2.556s
+1000
+Now 2500.647s, on average 2.501s
+1500
+Now 3604.635s, on average 2.403s
+2000
+Now 4767.441s, on average 2.384s
+2500
+Now 6004.241s, on average 2.402s
+3000
+Now 7218.527s, on average 2.406s
+3500
+Now 8414.824s, on average 2.404s
+4000
+Now 9586.090s, on average 2.397s
+4500
+Now 10745.198s, on average 2.388s
+5000
+Now 11891.735s, on average 2.378s
+5500
+Now 13121.139s, on average 2.386s
+6000
+Now 14333.738s, on average 2.389s
+6500
+Now 15509.279s, on average 2.386s
+7000
+Now 16744.187s, on average 2.392s
+7500
+Now 17887.773s, on average 2.385s
+8000
+Now 19065.754s, on average 2.383s
+8500
+Now 20332.442s, on average 2.392s
+9000
+Now 21486.604s, on average 2.387s
+9500
+Now 22638.599s, on average 2.383s
+10000
+Now 23829.717s, on average 2.383s
+10500
+Now 25015.283s, on average 2.382s
+11000
+Now 26220.664s, on average 2.384s
+11500
+Now 27326.040s, on average 2.376s
+12000
+Now 28489.309s, on average 2.374s
+12500
+Now 29663.839s, on average 2.373s
+13000
+Now 30835.218s, on average 2.372s
+13500
+Now 32019.396s, on average 2.372s
+14000
+Now 33168.368s, on average 2.369s
+14500
+Now 34393.461s, on average 2.372s
+15000
+Now 35580.437s, on average 2.372s
+15500
+Now 36785.757s, on average 2.373s
+16000
+Now 38191.511s, on average 2.387s
+16500
+Now 39374.735s, on average 2.386s
+17000
+Now 40512.424s, on average 2.383s
+17500
+Now 41643.183s, on average 2.380s
+18000
+Now 42851.243s, on average 2.381s
+18500
+Now 44043.630s, on average 2.381s
+19000
+Now 45192.150s, on average 2.379s
+19500
+Now 46385.137s, on average 2.379s
+20000
+Now 47482.688s, on average 2.374s
+20500
+Now 48623.649s, on average 2.372s
+21000
+Now 49752.885s, on average 2.369s
+21500
+Now 50947.780s, on average 2.370s
+22000
+Now 52060.932s, on average 2.366s
+22500
+Now 53266.341s, on average 2.367s
+23000
+Now 54478.975s, on average 2.369s
+23500
+Now 55711.381s, on average 2.371s
+24000
+Now 56895.145s, on average 2.371s
+24500
+Now 58086.761s, on average 2.371s
+25000
+Now 59279.107s, on average 2.371s
+25500
+Now 60493.038s, on average 2.372s
+26000
+Now 61698.409s, on average 2.373s
+26500
+Now 62823.532s, on average 2.371s
+27000
+Now 63987.581s, on average 2.370s
+27500
+Now 65202.189s, on average 2.371s
+28000
+Now 66444.210s, on average 2.373s
+28500
+Now 67752.595s, on average 2.377s
+29000
+Now 68993.932s, on average 2.379s
+29500
+Now 70156.512s, on average 2.378s
+30000
+Now 71342.810s, on average 2.378s
+30500
+Now 72568.398s, on average 2.379s
+31000
+Now 73703.650s, on average 2.378s
+31500
+Now 74879.740s, on average 2.377s
+32000
+Now 76037.716s, on average 2.376s
+32500
+Now 77247.786s, on average 2.377s
+33000
+Now 78453.778s, on average 2.377s
+33500
+Now 79662.620s, on average 2.378s
+34000
+Now 80820.094s, on average 2.377s
+34500
+Now 82009.070s, on average 2.377s
+35000
+Now 83179.050s, on average 2.377s
+35500
+Now 84352.619s, on average 2.376s
+36000
+Now 85540.166s, on average 2.376s
+36500
+Now 86693.500s, on average 2.375s
+37000
+Now 87893.329s, on average 2.375s
+37500
+Now 89088.031s, on average 2.376s
+38000
+Now 90300.902s, on average 2.376s
+38500
+Now 91554.725s, on average 2.378s
+39000
+Now 92699.568s, on average 2.377s
+39500
+Now 93895.344s, on average 2.377s
+40000
+Now 95077.485s, on average 2.377s
+40500
+Now 96226.684s, on average 2.376s
+41000
+Now 97507.215s, on average 2.378s
+41500
+Now 98673.867s, on average 2.378s
+42000
+Now 99843.478s, on average 2.377s
+42500
+Now 101017.784s, on average 2.377s
+43000
+Now 102256.728s, on average 2.378s
+43500
+Now 103439.549s, on average 2.378s
+44000
+Now 104581.814s, on average 2.377s
+44500
+Now 105813.666s, on average 2.378s
+45000
+Now 107024.087s, on average 2.378s
+45500
+Now 108194.019s, on average 2.378s
+46000
+Now 109382.420s, on average 2.378s
+46500
+Now 110601.827s, on average 2.379s
+47000
+Now 111745.600s, on average 2.378s
+47500
+Now 112980.036s, on average 2.379s
+48000
+Now 114130.026s, on average 2.378s
+48500
+Now 115322.890s, on average 2.378s
+49000
+Now 116506.299s, on average 2.378s
+49500
+Now 117674.489s, on average 2.377s
+50000
+Now 118865.364s, on average 2.377s
+50500
+Now 120044.399s, on average 2.377s
+51000
+Now 121224.223s, on average 2.377s
+51500
+Now 122438.353s, on average 2.377s
+52000
+Now 123601.505s, on average 2.377s
+52500
+Now 124797.278s, on average 2.377s
+53000
+Now 126011.969s, on average 2.378s
+53500
+Now 127251.415s, on average 2.379s
+54000
+Now 128473.364s, on average 2.379s
+54500
+Now 129679.824s, on average 2.379s
+55000
+Now 130877.405s, on average 2.380s
+55500
+Now 132049.311s, on average 2.379s
+56000
+Now 133213.103s, on average 2.379s
+56500
+Now 134379.609s, on average 2.378s
+57000
+Now 135487.242s, on average 2.377s
+57500
+Now 136674.013s, on average 2.377s
+58000
+Now 137868.213s, on average 2.377s
+58500
+Now 139033.116s, on average 2.377s
+59000
+Now 140144.466s, on average 2.375s
+59500
+Now 141234.200s, on average 2.374s
+60000
+Now 142392.255s, on average 2.373s
+60500
+Now 143634.184s, on average 2.374s
+61000
+Now 144791.872s, on average 2.374s
+61500
+Now 145960.379s, on average 2.373s
+62000
+Now 147170.679s, on average 2.374s
+62500
+Now 148377.168s, on average 2.374s
+63000
+Now 149516.288s, on average 2.373s
+63500
+Now 150701.539s, on average 2.373s
+64000
+Now 151916.433s, on average 2.374s
+64500
+Now 153062.011s, on average 2.373s
+65000
+Now 154443.624s, on average 2.376s
+65500
+Now 155698.663s, on average 2.377s
+66000
+Now 156998.226s, on average 2.379s
+66500
+Now 158399.995s, on average 2.382s
+67000
+Now 159557.251s, on average 2.381s
+67500
+Now 160754.103s, on average 2.382s
+68000
+Now 161965.287s, on average 2.382s
+68500
+Now 163236.372s, on average 2.383s
+69000
+Now 164410.443s, on average 2.383s
+69500
+Now 165584.724s, on average 2.383s
+70000
+Now 166765.108s, on average 2.382s
+70500
+Now 167932.110s, on average 2.382s
+71000
+Now 169146.539s, on average 2.382s

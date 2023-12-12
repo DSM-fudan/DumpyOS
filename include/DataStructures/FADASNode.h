@@ -101,7 +101,9 @@ class FADASNode {
 
     static void loadPaa(const string & paafn);
     static int loadSax(const string & saxfn);
+    static int loadSax2(const string & saxfn);
     static long generateSaxAndPaaTbl();
+    static long generateSaxTblParallel2();
     PAA_INFO* statPaa();
     void chooseSegment(PAA_INFO *paa, int chosen_num);
     static int chooseOneSegment(PAA_INFO *node);
@@ -111,7 +113,7 @@ class FADASNode {
     void generateSaxAndCardinality4LeafNode(FADASNode *node, int new_id);
     static int partition1stLayer(partUnit *nodes_map, vector<vector<int>> *g,double filling_factor);
     static int partition(partUnit *nodes_map, int chosen_num);
-    void growIndex();
+
     void growIndexLessPack();
     void growIndexFuzzy(unordered_map<FADASNode *, NODE_RECORDER> &navigating_tbl, vector<vector<int>> *g);
 
@@ -138,16 +140,19 @@ class FADASNode {
     int get1stLayerInterNodesNo();
     int get1stLayerInterNodeSeriesNo();
     int get1stLayerNodesNo();
+    static long generateSaxTblParallel();
 
 
 public:
     const static int power_2[];
     static int* mask;
     static unsigned short *saxes;
+    static unsigned short**sax_tbl;
     static float *paas;
     static int a,b,c;
     static int*** combines;
     static int * combine_num;
+    vector<unsigned short> sax_buffer; // only for leaf node/pack
 
     vector<int>pos_cache;
     unsigned short sax[Const::segmentNum]{};
@@ -163,7 +168,9 @@ public:
     vector<int> offsets{};
 
     FADASNode *route(const unsigned short *_sax);
+    FADASNode* routeFuzzySeries(const unsigned short *_sax);
     static FADASNode *BuildIndex(string &datafn, string &saxfn);
+    static FADASNode *BuildIndexParallel(string &datafn, string &saxfn);
     static FADASNode *BuildIndexLessPack(string& datafn, string &saxfn, string &paafn, vector<vector<int>> *g);
     static FADASNode *BuildIndexPos(string &datafn, string &saxfn, string &paafn, vector<vector<int>> *g);
 
@@ -253,6 +260,8 @@ public:
 
     void determineSegments();
 
+    void determineSegments2();
+
     void determineFanout(int *lambda_min, int *lambda_max) const;
 
     double compute_score(vector<int> &node_sizes, int *plan, int lambda, vector<double> &data_seg_stdev) const;
@@ -308,6 +317,10 @@ public:
     static void loadCombines();
 
     void getBoundRange(double *sum, double *sum_square, int *leafNum, double *sum_dist);
+
+    void growIndex();
+
+    void growIndexParallel();
 };
 
 struct NODE_RECORDER{

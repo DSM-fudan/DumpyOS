@@ -43,9 +43,13 @@ public:
 
     static void ngSearchDumpy(FADASNode *root, vector<vector<int>> *g);
 
+    static void ngSearchDumpyParallel(FADASNode *root, vector<vector<int>> *g);
+
     static void exactSearchFADAS(FADASNode *root, vector<vector<int>> *g);
 
     static void exactSearchDumpyParallel(FADASNode *root, vector<vector<int>>*g);
+
+    static void exactSearchDumpyParallelDTW(FADASNode *root, vector<vector<int>>*g);
 
     static void exactSearchFADASDTW(FADASNode *root, vector<vector<int>>*g);
 
@@ -72,6 +76,8 @@ public:
     static void progressiveSearchInMeomoryiSAX(iSAXRoot *root);
 
     static void doExprWithResIncFADASFuzzy(FADASNode *root, vector<vector<int>> *g, const string &index_dir);
+
+    static void multiwayDumpySearch(FADASNode *root, vector<vector<int>> *g, const string &index_dir);
 
     static void doExprWithResIncTardis(TardisTreeNode *root, const string &resFile, const string &queryFile);
 
