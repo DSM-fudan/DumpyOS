@@ -1,11 +1,12 @@
-# DumpyOS: A Data-Adaptive Multi-ary Index for Scalable Data Series Similarity Search (VLDB Journal under review)
+# DumpyOS: A Data-Adaptive Multi-ary Index for Scalable Data Series Similarity Search (VLDB Journal in 2024)
 
-DumpyOS is an enhanced version of Dumpy, focusing on the building efficiency, search accuracy and pruning-based search efficiency.
+DumpyOS is an enhanced version of Dumpy, focusing on building efficiency, search accuracy, and pruning-based search efficiency.
 
 # License
 This archive is free for use for academic and non-profit purposes, but if you use it, please reference it properly.
 
 # Reference
+Wang, Z., Wang, Q., Wang, P. et al. DumpyOS: A data-adaptive multi-ary index for scalable data series similarity search. The VLDB Journal (2024). https://doi.org/10.1007/s00778-024-00874-9
 
 # Disclaimer
 The code is provided without warranty of any kind. While we thoroughly tested all code bases on Ubuntu 20.04 LTS (Windows Subsystem of Linux), we do not guarantee that they are exempt from bugs, nor that they will work on other platforms. If you encounter any issues with the code, please feel free to propose them on the ISSUE page of this repo. We will do our best to address your concerns but do not promise to resolve all issues.
@@ -25,7 +26,7 @@ We test this project in Cmake 3.20 with C++ language standard 23, however, we SU
 
 *If you can use IDE like Clion*, just open this project use that and build it automatically and then run it.
 
-*Else*, please refer to following instructions.
+*Else*, please refer to the following instructions.
 
 1. create a "build" directory under the project
 
